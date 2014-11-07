@@ -663,9 +663,15 @@ isl1208_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		goto exit_unregister;
 	}
 
-	if (rc & ISL1208_REG_SR_RTCF)
+	if (rc & ISL1208_REG_SR_RTCF) {
+		u8 regs[1];
+
 		dev_warn(&client->dev, "rtc power failure detected, "
 			 "please set clock.\n");
+		regs[0] = ISL1208_REG_SR_WRTC;
+		isl1208_i2c_set_regs(client, 7, regs, 1);
+		isl1208_i2c_set_regs(client, 0, regs, 1);
+	}
 
 	rc = sysfs_create_group(&client->dev.kobj, &isl1208_rtc_sysfs_files);
 	if (rc)

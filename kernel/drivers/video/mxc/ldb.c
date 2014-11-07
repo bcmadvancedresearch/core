@@ -105,6 +105,20 @@ static int g_ldb_mode;
 
 static struct fb_videomode ldb_modedb[] = {
 	{
+	"VGA", 60, 640, 480, 33333,
+	40, 40, 20, 20,
+	80, 5,
+	0,
+	},
+	{
+	"WGA", 60, 1368, 768, 11696,
+	40, 40, 10, 3,
+	80, 10,
+	0,
+	FB_VMODE_NONINTERLACED,
+	FB_MODE_IS_DETAILED,
+	},
+	{
 	 "LDB-WXGA", 60, 1280, 800, 14065,
 	 40, 40,
 	 10, 3,
@@ -128,6 +142,13 @@ static struct fb_videomode ldb_modedb[] = {
 	 0,
 	 FB_VMODE_NONINTERLACED,
 	 FB_MODE_IS_DETAILED,},
+	{
+	"SVGA", 60, 800, 600, 25000,
+	210, 46,12, 23, 20, 10,
+	0,
+	FB_VMODE_NONINTERLACED,
+	0,
+	},
 };
 static int ldb_modedb_sz = ARRAY_SIZE(ldb_modedb);
 

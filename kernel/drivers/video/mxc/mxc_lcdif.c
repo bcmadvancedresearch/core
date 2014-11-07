@@ -28,17 +28,43 @@ struct mxc_lcdif_data {
 
 static struct fb_videomode lcdif_modedb[] = {
 	{
+	"LCD_1080P", 60, 1920, 1080, 7692, 100, 40, 30, 3, 10, 2,
+	0,
+	FB_VMODE_NONINTERLACED,
+	FB_MODE_IS_DETAILED,
+	},
+	{
+	"LCD_WVGA", 60, 1280, 720, 13468 , 220, 110,20, 5,40, 5,
+	0,
+	FB_VMODE_NONINTERLACED,
+	FB_MODE_IS_DETAILED,
+	},
+	{
+	"LCD_XGA", 60, 800, 480, 37037,
+	40, 40, 10, 3,
+	100, 20,
+	0,
+	FB_VMODE_NONINTERLACED,
+	FB_MODE_IS_DETAILED,
+	},
+	{
 	/* 800x480 @ 57 Hz , pixel clk @ 27MHz */
-	"CLAA-WVGA", 57, 800, 480, 37037, 40, 60, 10, 10, 20, 10,
+	"CLAA-WVGA", 57, 800, 480, 37037,
+	40, 60, 10, 10,
+	20, 10,
 	FB_SYNC_CLK_LAT_FALL,
 	FB_VMODE_NONINTERLACED,
-	0,},
+	0,
+	},
 	{
 	/* 800x480 @ 60 Hz , pixel clk @ 32MHz */
-	"SEIKO-WVGA", 60, 800, 480, 29850, 89, 164, 23, 10, 10, 10,
+	"SEIKO-WVGA", 60, 800, 480, 29850,
+	89, 164, 23, 10,
+	10, 10,
 	FB_SYNC_CLK_LAT_FALL,
 	FB_VMODE_NONINTERLACED,
-	0,},
+	0,
+	},
 };
 static int lcdif_modedb_sz = ARRAY_SIZE(lcdif_modedb);
 
