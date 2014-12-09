@@ -1,0 +1,18 @@
+menuconfig SMARC
+	tristate "SMARC Platform:"
+	help
+	  Chose this option to select carry board.
+
+if SMARC
+
+choice SMARC_CARRYBOARD
+	prompt "SMARC Carry Board"
+	default SMARC_RAP_SA01
+
+config SMARC_REV_SA01
+	bool "SMARC for REV-SA01"
+	help
+      SMARC for REV-SA01
+
+endchoice
+endif

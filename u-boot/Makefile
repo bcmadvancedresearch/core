@@ -3323,6 +3323,21 @@ mx6q_arm2_iram_config	: unconfig
 		}
 	@$(MKCONFIG) $(@:_config=) arm arm_cortexa8 mx6q_arm2 freescale mx6
 
+###################
+##  SMARC Build  ##
+###################
+mx6q_smarc_2g_mfg_config		\
+mx6q_smarc_mfg_config			\
+mx6solo_smarc_mfg_config		\
+mx6q_rev_sa01_2g_config			\
+mx6q_rev_sa01_config			\
+mx6solo_rev_sa01_config : unconfig
+	@[ -z "$(findstring iram_,$@)" ] || \
+		{ echo "TEXT_BASE = 0x00907000" >$(obj)board/freescale/mx6q_smarc/config.tmp ; \
+		  echo "... with iram configuration" ; \
+		}
+	@$(MKCONFIG) $(@:_config=) arm arm_cortexa8 mx6q_smarc freescale mx6
+
 mx6solo_sabresd_config			\
 mx6solo_sabresd_mfg_config		\
 mx6dl_sabresd_config			\

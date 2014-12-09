@@ -1,7 +1,7 @@
 /*
- * Copyright (C) 2010-2012 Freescale Semiconductor, Inc.
+ * Copyright (C) 2012 Freescale Semiconductor, Inc.
  *
- * Configuration settings for the MX6Q Armadillo2 Freescale board.
+ * Configuration settings for the MX6Q Sabre Lite2 Freescale board.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -24,16 +24,18 @@
 
 #include <asm/arch/mx6.h>
 
-#define CONFIG_LPDDR2POP
  /* High Level Configuration Options */
+#define CONFIG_MFG
 #define CONFIG_ARMV7	/* This is armv7 Cortex-A9 CPU core */
 #define CONFIG_MXC
-#define CONFIG_MX6Q
-#define CONFIG_MX6Q_ARM2
-#define CONFIG_MX6Q_ARM2_LPDDR2POP
 #define CONFIG_FLASH_HEADER
 #define CONFIG_FLASH_HEADER_OFFSET 0x400
 #define CONFIG_MX6_CLK32	   32768
+#define CONFIG_MX6Q
+#define CONFIG_MX6Q_SMARC
+
+#define CONFIG_SYS_PROMPT   "MX6 QUAD SMARC U-Boot > "
+#define PHYS_SDRAM_1_SIZE   (1u * 1024 * 1024 * 1024)
 
 #define CONFIG_SKIP_RELOCATE_UBOOT
 
@@ -67,7 +69,7 @@
  * Hardware drivers
  */
 #define CONFIG_MXC_UART
-#define CONFIG_UART_BASE_ADDR   UART4_BASE_ADDR
+#define CONFIG_UART_BASE_ADDR   UART1_BASE_ADDR
 
 /* allow to overwrite serial and ethaddr */
 #define CONFIG_ENV_OVERWRITE
@@ -81,6 +83,7 @@
 
 #include <config_cmd_default.h>
 
+#define CONFIG_MXC_GPIO
 #define CONFIG_CMD_PING
 #define CONFIG_CMD_DHCP
 #define CONFIG_CMD_MII
@@ -99,41 +102,29 @@
 #define CONFIG_CMD_SF
 #define CONFIG_CMD_MMC
 #define CONFIG_CMD_ENV
-#define CONFIG_CMD_REGUL
 
 #define CONFIG_CMD_CLOCK
 #define CONFIG_REF_CLK_FREQ CONFIG_MX6_HCLK_FREQ
 
-#define CONFIG_CMD_SATA
+/* #define CONFIG_CMD_SATA */
 #undef CONFIG_CMD_IMLS
-
-#define CONFIG_CMD_IMX_DOWNLOAD_MODE
 
 #define CONFIG_BOOTDELAY 3
 
 #define CONFIG_PRIME	"FEC0"
 
 #define CONFIG_LOADADDR		0x10800000	/* loadaddr env var */
-#define CONFIG_RD_LOADADDR	(CONFIG_LOADADDR + 0x300000)
+#define CONFIG_RD_LOADADDR	0x10c00000
+
+#define CONFIG_BOOTARGS         "console=ttymxc0,115200 rdinit=/linuxrc "\
+				"enable_wait_mode=off"
+#define CONFIG_BOOTCOMMAND      "bootm 0x10800000 0x10c00000"
 
 #define	CONFIG_EXTRA_ENV_SETTINGS					\
 		"netdev=eth0\0"						\
 		"ethprime=FEC0\0"					\
 		"uboot=u-boot.bin\0"			\
 		"kernel=uImage\0"				\
-		"nfsroot=/opt/eldk/arm\0"				\
-		"bootargs_base=setenv bootargs console=ttymxc3,115200\0"\
-		"bootargs_nfs=setenv bootargs ${bootargs} root=/dev/nfs "\
-			"ip=dhcp nfsroot=${serverip}:${nfsroot},v3,tcp\0"\
-		"bootcmd_net=run bootargs_base bootargs_nfs; "		\
-			"tftpboot ${loadaddr} ${kernel}; bootm\0"	\
-		"bootargs_mmc=setenv bootargs ${bootargs} ip=dhcp "     \
-			"root=/dev/mmcblk0p1 rootwait\0"                \
-		"bootcmd_mmc=run bootargs_base bootargs_mmc; "   \
-		"mmc dev 3; "	\
-		"mmc read ${loadaddr} 0x800 0x2000; bootm\0"	\
-		"bootcmd=run bootcmd_net\0"                             \
-
 
 #define CONFIG_ARP_TIMEOUT	200UL
 
@@ -141,9 +132,8 @@
  * Miscellaneous configurable options
  */
 #define CONFIG_SYS_LONGHELP		/* undef to save memory */
-#define CONFIG_SYS_PROMPT		"MX6Q ARM2 U-Boot > "
 #define CONFIG_AUTO_COMPLETE
-#define CONFIG_SYS_CBSIZE		1024	/* Console I/O Buffer Size */
+#define CONFIG_SYS_CBSIZE		256	/* Console I/O Buffer Size */
 /* Print Buffer Size */
 #define CONFIG_SYS_PBSIZE (CONFIG_SYS_CBSIZE + sizeof(CONFIG_SYS_PROMPT) + 16)
 #define CONFIG_SYS_MAXARGS	16	/* max number of command args */
@@ -202,17 +192,10 @@
 #ifdef CONFIG_CMD_SF
 	#define CONFIG_FSL_SF		1
 	#define CONFIG_SPI_FLASH_IMX_M25PXX	1
-	#define CONFIG_SPI_FLASH_CS	1
+	#define CONFIG_SPI_FLASH_CS	0
 	#define CONFIG_IMX_ECSPI
 	#define IMX_CSPI_VER_2_3	1
 	#define MAX_SPI_BYTES		(64 * 4)
-#endif
-
-/* Regulator Configs */
-#ifdef CONFIG_CMD_REGUL
-	#define CONFIG_ANATOP_REGULATOR
-	#define CONFIG_CORE_REGULATOR_NAME "vdd1p1"
-	#define CONFIG_PERIPH_REGULATOR_NAME "vdd1p1"
 #endif
 
 /*
@@ -248,10 +231,6 @@
 	#define CONFIG_DWC_AHSATA_BASE_ADDR	SATA_ARB_BASE_ADDR
 	#define CONFIG_LBA48
 	#define CONFIG_LIBATA
-
-	#define CONFIG_DOS_PARTITION	1
-	#define CONFIG_CMD_FAT		1
-	#define CONFIG_CMD_EXT2		1
 #endif
 
 /*
@@ -271,6 +250,10 @@
 	#define CONFIG_SYS_NAND_BASE		0x40000000
 	#define CONFIG_SYS_MAX_NAND_DEVICE	1
 
+	#define CONFIG_DOS_PARTITION	1
+	#define CONFIG_CMD_FAT		1
+	#define CONFIG_CMD_EXT2		1
+
 	/* NAND is the unique module invoke APBH-DMA */
 	#define CONFIG_APBH_DMA
 	#define CONFIG_APBH_DMA_V2
@@ -287,14 +270,10 @@
 /*-----------------------------------------------------------------------
  * Physical Memory Map
  */
-#define CONFIG_NR_DRAM_BANKS	2
+#define CONFIG_NR_DRAM_BANKS	1
 #define PHYS_SDRAM_1		CSD0_DDR_BASE_ADDR
-#define PHYS_SDRAM_1_SIZE	(256 * 1024 * 1024)
-#define PHYS_SDRAM_2		CSD1_DDR_BASE_ADDR
-#define PHYS_SDRAM_2_SIZE	(256 * 1024 * 1024)
 #define iomem_valid_addr(addr, size) \
- ((addr >= PHYS_SDRAM_1 && addr <= (PHYS_SDRAM_1 + PHYS_SDRAM_1_SIZE)) || \
- (addr >= PHYS_SDRAM_2 && addr <= (PHYS_SDRAM_2 + PHYS_SDRAM_2_SIZE)))
+	(addr >= PHYS_SDRAM_1 && addr <= (PHYS_SDRAM_1 + PHYS_SDRAM_1_SIZE))
 
 /*-----------------------------------------------------------------------
  * FLASH and environment organization
@@ -302,30 +281,13 @@
 #define CONFIG_SYS_NO_FLASH
 
 /* Monitor at beginning of flash */
-#define CONFIG_FSL_ENV_IN_MMC
+/* #define CONFIG_FSL_ENV_IN_MMC */
 /* #define CONFIG_FSL_ENV_IN_NAND */
 /* #define CONFIG_FSL_ENV_IN_SATA */
 
-#define CONFIG_ENV_SECT_SIZE    (8 * 1024)
+#define CONFIG_ENV_SECT_SIZE    (128 * 1024)
 #define CONFIG_ENV_SIZE         CONFIG_ENV_SECT_SIZE
-
-#if defined(CONFIG_FSL_ENV_IN_NAND)
-	#define CONFIG_ENV_IS_IN_NAND 1
-	#define CONFIG_ENV_OFFSET	0x100000
-#elif defined(CONFIG_FSL_ENV_IN_MMC)
-	#define CONFIG_ENV_IS_IN_MMC	1
-	#define CONFIG_ENV_OFFSET	(768 * 1024)
-#elif defined(CONFIG_FSL_ENV_IN_SATA)
-	#define CONFIG_ENV_IS_IN_SATA   1
-	#define CONFIG_SATA_ENV_DEV     0
-	#define CONFIG_ENV_OFFSET       (768 * 1024)
-#elif defined(CONFIG_FSL_ENV_IN_SF)
-	#define CONFIG_ENV_IS_IN_SPI_FLASH	1
-	#define CONFIG_ENV_SPI_CS		1
-	#define CONFIG_ENV_OFFSET       (768 * 1024)
-#else
-	#define CONFIG_ENV_IS_NOWHERE	1
-#endif
+#define CONFIG_ENV_IS_NOWHERE   1
 
 #ifdef CONFIG_SPLASH_SCREEN
 	/*

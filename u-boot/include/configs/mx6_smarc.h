@@ -1,7 +1,7 @@
 /*
- * Copyright (C) 2010-2012 Freescale Semiconductor, Inc.
+ * Copyright (C) 2012 Freescale Semiconductor, Inc.
  *
- * Configuration settings for the MX6Q Armadillo2 Freescale board.
+ * Configuration settings for the MX6Q Sabre Lite2 Freescale board.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -24,13 +24,9 @@
 
 #include <asm/arch/mx6.h>
 
-#define CONFIG_LPDDR2POP
  /* High Level Configuration Options */
 #define CONFIG_ARMV7	/* This is armv7 Cortex-A9 CPU core */
 #define CONFIG_MXC
-#define CONFIG_MX6Q
-#define CONFIG_MX6Q_ARM2
-#define CONFIG_MX6Q_ARM2_LPDDR2POP
 #define CONFIG_FLASH_HEADER
 #define CONFIG_FLASH_HEADER_OFFSET 0x400
 #define CONFIG_MX6_CLK32	   32768
@@ -55,6 +51,8 @@
 #define CONFIG_REVISION_TAG
 #define CONFIG_SETUP_MEMORY_TAGS
 #define CONFIG_INITRD_TAG
+#define CONFIG_MXC_GPIO
+#define	CONFIG_SPLASH_SCREEN
 
 /*
  * Size of malloc() pool
@@ -62,12 +60,6 @@
 #define CONFIG_SYS_MALLOC_LEN		(2 * 1024 * 1024)
 /* size in bytes reserved for initial data */
 #define CONFIG_SYS_GBL_DATA_SIZE	128
-
-/*
- * Hardware drivers
- */
-#define CONFIG_MXC_UART
-#define CONFIG_UART_BASE_ADDR   UART4_BASE_ADDR
 
 /* allow to overwrite serial and ethaddr */
 #define CONFIG_ENV_OVERWRITE
@@ -91,12 +83,12 @@
 #define CONFIG_BOOTP_GATEWAY
 #define CONFIG_BOOTP_DNS
 
-#define CONFIG_CMD_SPI
-#define CONFIG_CMD_I2C
+//#define CONFIG_CMD_SPI
+//#define CONFIG_CMD_I2C
 #define CONFIG_CMD_IMXOTP
 
 /* Enable below configure when supporting nand */
-#define CONFIG_CMD_SF
+//#define CONFIG_CMD_SF
 #define CONFIG_CMD_MMC
 #define CONFIG_CMD_ENV
 #define CONFIG_CMD_REGUL
@@ -104,7 +96,7 @@
 #define CONFIG_CMD_CLOCK
 #define CONFIG_REF_CLK_FREQ CONFIG_MX6_HCLK_FREQ
 
-#define CONFIG_CMD_SATA
+/* #define CONFIG_CMD_SATA */
 #undef CONFIG_CMD_IMLS
 
 #define CONFIG_CMD_IMX_DOWNLOAD_MODE
@@ -114,34 +106,44 @@
 #define CONFIG_PRIME	"FEC0"
 
 #define CONFIG_LOADADDR		0x10800000	/* loadaddr env var */
-#define CONFIG_RD_LOADADDR	(CONFIG_LOADADDR + 0x300000)
+#define CONFIG_RD_LOADADDR	(0x1100000)
 
-#define	CONFIG_EXTRA_ENV_SETTINGS					\
-		"netdev=eth0\0"						\
-		"ethprime=FEC0\0"					\
-		"uboot=u-boot.bin\0"			\
-		"kernel=uImage\0"				\
-		"nfsroot=/opt/eldk/arm\0"				\
-		"bootargs_base=setenv bootargs console=ttymxc3,115200\0"\
-		"bootargs_nfs=setenv bootargs ${bootargs} root=/dev/nfs "\
-			"ip=dhcp nfsroot=${serverip}:${nfsroot},v3,tcp\0"\
-		"bootcmd_net=run bootargs_base bootargs_nfs; "		\
-			"tftpboot ${loadaddr} ${kernel}; bootm\0"	\
-		"bootargs_mmc=setenv bootargs ${bootargs} ip=dhcp "     \
-			"root=/dev/mmcblk0p1 rootwait\0"                \
-		"bootcmd_mmc=run bootargs_base bootargs_mmc; "   \
-		"mmc dev 3; "	\
-		"mmc read ${loadaddr} 0x800 0x2000; bootm\0"	\
-		"bootcmd=run bootcmd_net\0"                             \
+#define	CONFIG_EXTRA_ENV_SETTINGS									\
+		"netdev=eth0\0"												\
+		"ethprime=FEC0\0"											\
+		"ethaddr=00:04:9f:00:ea:d3\0"								\
+		"fec_addr=00:04:9f:00:ea:d3\0"								\
+		"uboot=u-boot.bin\0"										\
+		"kernel=uImage\0"											\
+		"nfsroot=/opt/eldk/arm\0"									\
+		"network=ip=dhcp\0"											\
+		"bootargs_base=setenv bootargs console=ttymxc0,115200\0"	\
+		"bootargs_nfs=setenv bootargs ${bootargs} root=/dev/nfs "	\
+			"ip=dhcp nfsroot=${serverip}:${nfsroot},v3,tcp\0"		\
+		"bootcmd_net=run bootargs_base bootargs_nfs; "				\
+			"tftpboot ${loadaddr} ${kernel}; bootm\0"				\
+		"bootargs_mmc=setenv bootargs ${bootargs} ${network} "		\
+			"root=/dev/mmcblk0p1 rootwait\0"						\
+		"bootcmd_mmc=run bootargs_base bootargs_mmc; "				\
+			"mmc dev 3; "											\
+			"mmc read ${loadaddr} 0x800 0x3000; bootm\0"			\
+		"linux_bootargs=console=tty0 console=ttymxc0,115200 "		\
+			"root=/dev/mmcblk0p1 "									\
+			"rootwait rw fbmem=10M\0"								\
+		"linux_cmd=setenv bootargs ${linux_bootargs};"				\
+            "mmc dev 3;"											\
+			"mmc read ${loadaddr} 0x800 0x3000;"					\
+			"bootm\0"												\
+		"bootcmd=run linux_cmd\0"
 
 
 #define CONFIG_ARP_TIMEOUT	200UL
+#define	CONFIG_MX6_SMARC	"SMA-IMX6_A0_0423"
 
 /*
  * Miscellaneous configurable options
  */
 #define CONFIG_SYS_LONGHELP		/* undef to save memory */
-#define CONFIG_SYS_PROMPT		"MX6Q ARM2 U-Boot > "
 #define CONFIG_AUTO_COMPLETE
 #define CONFIG_SYS_CBSIZE		1024	/* Console I/O Buffer Size */
 /* Print Buffer Size */
@@ -165,7 +167,8 @@
 #define CONFIG_FEC0_MIIBASE	-1
 #define CONFIG_GET_FEC_MAC_ADDR_FROM_IIM
 #define CONFIG_MXC_FEC
-#define CONFIG_FEC0_PHY_ADDR		0
+#define CONFIG_FEC0_PHY_ADDR		0xFF
+#define CONFIG_DISCOVER_PHY
 #define CONFIG_ETH_PRIME
 #define CONFIG_RMII
 #define CONFIG_CMD_MII
@@ -191,9 +194,10 @@
 #ifdef CONFIG_CMD_I2C
 	#define CONFIG_HARD_I2C         1
 	#define CONFIG_I2C_MXC          1
-	#define CONFIG_SYS_I2C_PORT             I2C3_BASE_ADDR
+	#define CONFIG_SYS_I2C_PORT             I2C2_BASE_ADDR
 	#define CONFIG_SYS_I2C_SPEED            100000
-	#define CONFIG_SYS_I2C_SLAVE            0x1f
+	#define CONFIG_SYS_I2C_SLAVE            0x8
+	#define CONFIG_MX6_INTER_LDO_BYPASS		0
 #endif
 
 /*
@@ -202,7 +206,7 @@
 #ifdef CONFIG_CMD_SF
 	#define CONFIG_FSL_SF		1
 	#define CONFIG_SPI_FLASH_IMX_M25PXX	1
-	#define CONFIG_SPI_FLASH_CS	1
+	#define CONFIG_SPI_FLASH_CS	0
 	#define CONFIG_IMX_ECSPI
 	#define IMX_CSPI_VER_2_3	1
 	#define MAX_SPI_BYTES		(64 * 4)
@@ -237,6 +241,18 @@
 	/* Setup target delay in DDR mode for each SD port */
 	#define CONFIG_GET_DDR_TARGET_DELAY
 #endif
+
+/*
+ * FUSE Configs
+ * */
+//#define	CONFIG_CMD_IIM
+#ifdef CONFIG_CMD_IIM
+    #define CONFIG_IMX_IIM
+    #define IMX_IIM_BASE    IIM_BASE_ADDR
+    #define CONFIG_IIM_MAC_BANK 1
+    #define CONFIG_IIM_MAC_ROW  9
+#endif
+
 
 /*
  * SATA Configs
@@ -287,14 +303,10 @@
 /*-----------------------------------------------------------------------
  * Physical Memory Map
  */
-#define CONFIG_NR_DRAM_BANKS	2
+#define CONFIG_NR_DRAM_BANKS	1
 #define PHYS_SDRAM_1		CSD0_DDR_BASE_ADDR
-#define PHYS_SDRAM_1_SIZE	(256 * 1024 * 1024)
-#define PHYS_SDRAM_2		CSD1_DDR_BASE_ADDR
-#define PHYS_SDRAM_2_SIZE	(256 * 1024 * 1024)
 #define iomem_valid_addr(addr, size) \
- ((addr >= PHYS_SDRAM_1 && addr <= (PHYS_SDRAM_1 + PHYS_SDRAM_1_SIZE)) || \
- (addr >= PHYS_SDRAM_2 && addr <= (PHYS_SDRAM_2 + PHYS_SDRAM_2_SIZE)))
+	(addr >= PHYS_SDRAM_1 && addr <= (PHYS_SDRAM_1 + PHYS_SDRAM_1_SIZE))
 
 /*-----------------------------------------------------------------------
  * FLASH and environment organization
@@ -331,6 +343,9 @@
 	/*
 	 * Framebuffer and LCD
 	 */
+	#define	SMARC_SCREEN_OFF
+	#define	SMARC_LVDS_BKLT_EN	IMX_GPIO_NR(3, 0)
+	#define	SMARC_LCD_VDD_EN	IMX_GPIO_NR(2, 22)
 	#define CONFIG_LCD
 	#define CONFIG_IPU_V3H
 	#define CONFIG_VIDEO_MX5
@@ -344,5 +359,69 @@
 	#define CONFIG_FB_BASE	(TEXT_BASE + 0x300000)
 	#define CONFIG_SPLASH_SCREEN_ALIGN
 	#define CONFIG_SYS_WHITE_ON_BLACK
+
+	#define CONFIG_IMX_PWM
+	#define IMX_PWM1_BASE    PWM1_BASE_ADDR
+	#define IMX_PWM2_BASE    PWM2_BASE_ADDR
+#endif
+
+#ifdef	CONFIG_USING_ANDROID
+
+#define CONFIG_USB_DEVICE
+#define CONFIG_IMX_UDC             1
+#define CONFIG_FASTBOOT            1
+#define CONFIG_FASTBOOT_STORAGE_EMMC_SATA
+#define CONFIG_FASTBOOT_VENDOR_ID      0x18d1
+#define CONFIG_FASTBOOT_PRODUCT_ID     0x0d02
+#define CONFIG_FASTBOOT_BCD_DEVICE     0x311
+#define CONFIG_FASTBOOT_MANUFACTURER_STR  "Freescale"
+#define CONFIG_FASTBOOT_PRODUCT_NAME_STR "i.mx6q Sabre Smart Device"
+#define CONFIG_FASTBOOT_INTERFACE_STR    "Android fastboot"
+#define CONFIG_FASTBOOT_CONFIGURATION_STR  "Android fastboot"
+#define CONFIG_FASTBOOT_SERIAL_NUM  "12345"
+#define CONFIG_FASTBOOT_SATA_NO      0
+
+/*  For system.img growing up more than 256MB, more buffer needs
+*   to receive the system.img*/
+#define CONFIG_FASTBOOT_TRANSFER_BUF    0x2c000000
+#define CONFIG_FASTBOOT_TRANSFER_BUF_SIZE 0x14000000 /* 320M byte */
+
+#define CONFIG_CMD_BOOTI
+#define CONFIG_ANDROID_RECOVERY
+/* which mmc bus is your main storage ? */
+#define CONFIG_ANDROID_MAIN_MMC_BUS 3
+#define CONFIG_ANDROID_BOOT_PARTITION_MMC 1
+#define CONFIG_ANDROID_SYSTEM_PARTITION_MMC 5
+#define CONFIG_ANDROID_RECOVERY_PARTITION_MMC 2
+#define CONFIG_ANDROID_CACHE_PARTITION_MMC 6
+
+
+#define CONFIG_ANDROID_RECOVERY_BOOTARGS_MMC NULL
+#define CONFIG_ANDROID_RECOVERY_BOOTCMD_MMC  \
+    "booti mmc3 recovery"
+#define CONFIG_ANDROID_RECOVERY_CMD_FILE "/recovery/command"
+#define CONFIG_INITRD_TAG
+
+/*
+#undef CONFIG_LOADADDR
+#undef CONFIG_RD_LOADADDR
+#undef CONFIG_EXTRA_ENV_SETTINGS
+
+#define CONFIG_LOADADDR     0x10800000
+#define CONFIG_RD_LOADADDR      0x11000000
+*/
+
+#define CONFIG_INITRD_TAG
+
+/*
+#define CONFIG_EXTRA_ENV_SETTINGS                   \
+        "netdev=eth0\0"                     \
+        "ethprime=FEC0\0"                   \
+        "fastboot_dev=mmc3\0"                   \
+        "bootcmd=booti mmc3\0"                  \
+        "splashimage=0x30000000\0"              \
+        "splashpos=m,m\0"                   \
+        "lvds_num=0\0"
+*/
 #endif
 #endif				/* __CONFIG_H */

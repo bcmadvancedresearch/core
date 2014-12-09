@@ -128,4 +128,6 @@ source "drivers/clocksource/Kconfig"
 
 source "drivers/mxc/Kconfig"
 
+source "arch/arm/mach-mx6/smarc/Kconfig"
+
 endmenu
