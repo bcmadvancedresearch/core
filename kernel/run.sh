@@ -15,7 +15,7 @@ if [ $1 == "clean" ]; then
 	exit;
 fi
 
-if [ $1 == "smarc-mfg" ]; then
+if [ $1 == "mfg" ]; then
 	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE imx6_smarc_mfg_defconfig
 	JOBS=$2
 fi

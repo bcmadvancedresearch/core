@@ -12,7 +12,12 @@ choice SMARC_CARRYBOARD
 config SMARC_REV_SA01
 	bool "SMARC for REV-SA01"
 	help
-      SMARC for REV-SA01
+	  SMARC for REV-SA01
+
+config SMARC_MFG
+	bool "SMARC for MFG tools"
+	help
+	  SMARC for MFG tools
 
 endchoice
 endif
