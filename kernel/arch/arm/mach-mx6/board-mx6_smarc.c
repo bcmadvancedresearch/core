@@ -457,10 +457,7 @@ static void __init mx6_smarc_board_init(void)
 	imx6q_add_viim();
 	imx6q_add_imx2_wdt(0, NULL);
 	imx6q_add_dma();
-
-	#ifndef CONFIG_SMARC_REV_SA01
 	imx6q_add_pcie(&mx6_smarc_pcie_data);
-	#endif
 
 	gp_reg_id = smarc_dvfscore_data.reg_id;
 	soc_reg_id = smarc_dvfscore_data.soc_id;
