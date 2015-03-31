@@ -25,6 +25,11 @@ if [ $1 == "rev-sa01" ]; then
 	JOBS=$2
 fi
 
+if [ $1 == "rev-sa01-p" ]; then
+	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE imx6_rev_sa01_p_defconfig
+	JOBS=$2
+fi
+
 if [ $1 == "menuconfig" ]; then
 	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE menuconfig
 	exit;
