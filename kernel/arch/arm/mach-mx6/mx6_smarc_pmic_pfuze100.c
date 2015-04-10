@@ -491,7 +491,7 @@ err:
 	return -1;
 }
 
-static struct pfuze_regulator_init_data mx6q_sabreauto_pfuze100_regulators[] = {
+static struct pfuze_regulator_init_data mx6q_smarc_pfuze100_regulators[] = {
 	{.id = PFUZE100_SW1A,	.init_data = &sw1a_init},
 	{.id = PFUZE100_SW1B,	.init_data = &sw1b_init},
 	{.id = PFUZE100_SW1C,	.init_data = &sw1c_init},
@@ -512,8 +512,8 @@ static struct pfuze_regulator_init_data mx6q_sabreauto_pfuze100_regulators[] = {
 
 static struct pfuze_platform_data pfuze100_plat = {
 	.flags = PFUZE_USE_REGULATOR,
-	.num_regulators = ARRAY_SIZE(mx6q_sabreauto_pfuze100_regulators),
-	.regulators = mx6q_sabreauto_pfuze100_regulators,
+	.num_regulators = ARRAY_SIZE(mx6q_smarc_pfuze100_regulators),
+	.regulators = mx6q_smarc_pfuze100_regulators,
 	.pfuze_init = pfuze100_init,
 };
 
@@ -525,5 +525,5 @@ static struct i2c_board_info __initdata pfuze100_i2c_device = {
 int __init mx6q_smarc_init_pfuze100(u32 int_gpio)
 {
 	pfuze100_i2c_device.irq = gpio_to_irq(int_gpio); /*update INT gpio */
-	return i2c_register_board_info(1, &pfuze100_i2c_device, 1);
+	return i2c_register_board_info(0, &pfuze100_i2c_device, 1);
 }
