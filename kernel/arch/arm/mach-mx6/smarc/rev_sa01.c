@@ -391,12 +391,14 @@ static struct wm8962_pdata wm8962_config_data = {
 };
 
 static struct regulator_consumer_supply smarc_vwm8962_consumers[] = {
+	#ifdef	MACH_MX6_SMARC
 	REGULATOR_SUPPLY("DCVDD", "0-001a"),
 	REGULATOR_SUPPLY("DBVDD", "0-001a"),
 	REGULATOR_SUPPLY("AVDD", "0-001a"),
 	REGULATOR_SUPPLY("CPVDD", "0-001a"),
 	REGULATOR_SUPPLY("MICVDD", "0-001a"),
 	REGULATOR_SUPPLY("PLLVDD", "0-001a"),
+	#endif
 	REGULATOR_SUPPLY("SPKVDD1", "0-001a"),
 	REGULATOR_SUPPLY("SPKVDD2", "0-001a"),
 };
