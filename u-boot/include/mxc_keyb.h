@@ -1,14 +1,7 @@
 /*
- * Copyright 2004-2010 Freescale Semiconductor, Inc. All Rights Reserved.
- */
-
-/*
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
+ * Copyright (C) 2009-2014 Freescale Semiconductor, Inc. All Rights Reserved.
  *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 /*!
@@ -169,7 +162,7 @@ enum KeyState {
 /*!
  * Keypad Private Data Structure
  */
-typedef struct keypad_priv {
+struct keypad_priv {
 
 	/*!
 	 * Keypad state machine.
@@ -185,7 +178,7 @@ typedef struct keypad_priv {
 	 * Number of Columns configured in the keypad matrix
 	 */
 	unsigned long kpp_cols;
-} keypad_priv;
+};
 
 /*!
  * Keypad Data Structure
@@ -197,5 +190,12 @@ struct kpp_key_info {
 
 int mxc_kpp_init(void);
 int mxc_kpp_getc(struct kpp_key_info **);
+
+/*!
+ * These functions are used to configure and the GPIO pins for keypad to
+ * activate and deactivate it.
+ */
+void setup_mxc_kpd(void);
+
 
 #endif				/* __MXC_KEYB_H__ */

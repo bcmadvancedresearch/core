@@ -522,7 +522,7 @@ static const struct ide_dma_ops tx4939ide_dma_ops = {
 	.dma_sff_read_status	= tx4939ide_dma_sff_read_status,
 };
 
-static const struct ide_port_info tx4939ide_port_info __initdata = {
+static const struct ide_port_info tx4939ide_port_info __initconst = {
 	.init_hwif		= tx4939ide_init_hwif,
 	.init_dma		= tx4939ide_init_dma,
 	.port_ops		= &tx4939ide_port_ops,
@@ -551,10 +551,10 @@ static int __init tx4939ide_probe(struct platform_device *pdev)
 		return -ENODEV;
 
 	if (!devm_request_mem_region(&pdev->dev, res->start,
-				     res->end - res->start + 1, "tx4938ide"))
+				     resource_size(res), "tx4938ide"))
 		return -EBUSY;
 	mapbase = (unsigned long)devm_ioremap(&pdev->dev, res->start,
-					      res->end - res->start + 1);
+					      resource_size(res));
 	if (!mapbase)
 		return -EBUSY;
 	memset(&hw, 0, sizeof(hw));
@@ -624,18 +624,7 @@ static struct platform_driver tx4939ide_driver = {
 	.resume = tx4939ide_resume,
 };
 
-static int __init tx4939ide_init(void)
-{
-	return platform_driver_probe(&tx4939ide_driver, tx4939ide_probe);
-}
-
-static void __exit tx4939ide_exit(void)
-{
-	platform_driver_unregister(&tx4939ide_driver);
-}
-
-module_init(tx4939ide_init);
-module_exit(tx4939ide_exit);
+module_platform_driver_probe(tx4939ide_driver, tx4939ide_probe);
 
 MODULE_DESCRIPTION("TX4939 internal IDE driver");
 MODULE_LICENSE("GPL");

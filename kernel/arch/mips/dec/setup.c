@@ -65,7 +65,7 @@ EXPORT_SYMBOL(ioasic_base);
 /*
  * IRQ routing and priority tables.  Priorites are set as follows:
  *
- * 		KN01	KN230	KN02	KN02-BA	KN02-CA	KN03
+ *		KN01	KN230	KN02	KN02-BA	KN02-CA	KN03
  *
  * MEMORY	CPU	CPU	CPU	ASIC	CPU	CPU
  * RTC		CPU	CPU	CPU	ASIC	CPU	CPU
@@ -101,20 +101,23 @@ int cpu_fpu_mask = DEC_CPU_IRQ_MASK(DEC_CPU_INR_FPU);
 static struct irqaction ioirq = {
 	.handler = no_action,
 	.name = "cascade",
+	.flags = IRQF_NO_THREAD,
 };
 static struct irqaction fpuirq = {
 	.handler = no_action,
 	.name = "fpu",
+	.flags = IRQF_NO_THREAD,
 };
 
 static struct irqaction busirq = {
-	.flags = IRQF_DISABLED,
 	.name = "bus error",
+	.flags = IRQF_NO_THREAD,
 };
 
 static struct irqaction haltirq = {
 	.handler = dec_intr_halt,
 	.name = "halt",
+	.flags = IRQF_NO_THREAD,
 };
 
 

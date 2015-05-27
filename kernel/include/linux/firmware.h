@@ -1,7 +1,6 @@
 #ifndef _LINUX_FIRMWARE_H
 #define _LINUX_FIRMWARE_H
 
-#include <linux/module.h>
 #include <linux/types.h>
 #include <linux/compiler.h>
 #include <linux/gfp.h>
@@ -13,8 +12,12 @@ struct firmware {
 	size_t size;
 	const u8 *data;
 	struct page **pages;
+
+	/* firmware loader private fields */
+	void *priv;
 };
 
+struct module;
 struct device;
 
 struct builtin_fw {
@@ -62,6 +65,14 @@ static inline int request_firmware_nowait(
 static inline void release_firmware(const struct firmware *fw)
 {
 }
+
+#endif
+
+#ifdef CONFIG_FW_LOADER_USER_HELPER
+int request_firmware_direct(const struct firmware **fw, const char *name,
+			    struct device *device);
+#else
+#define request_firmware_direct	request_firmware
 #endif
 
 #endif

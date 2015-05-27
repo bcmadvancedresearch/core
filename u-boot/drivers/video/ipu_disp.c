@@ -4,36 +4,22 @@
  * (C) Copyright 2010
  * Stefano Babic, DENX Software Engineering, sbabic@denx.de
  *
- * Linux IPU driver
+ * Linux IPU driver for MX51:
  *
- * (C) Copyright 2005-2011 Freescale Semiconductor, Inc.
+ * (C) Copyright 2005-2014 Freescale Semiconductor, Inc.
  *
- * See file CREDITS for list of people who contributed to this
- * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 /* #define DEBUG */
 
 #include <common.h>
-#include <ipu.h>
 #include <linux/types.h>
 #include <asm/errno.h>
 #include <asm/io.h>
+#include <asm/arch/imx-regs.h>
+#include <asm/arch/sys_proto.h>
+#include "ipu.h"
 #include "ipu_regs.h"
 
 enum csc_type_t {
@@ -62,6 +48,7 @@ static int dmfc_size_28, dmfc_size_29, dmfc_size_24, dmfc_size_27, dmfc_size_23;
 int g_di1_tvout;
 
 extern struct clk *g_ipu_clk;
+extern struct clk *g_ldb_clk;
 extern struct clk *g_di_clk[2];
 extern struct clk *g_pixel_clk[2];
 
@@ -397,29 +384,29 @@ void ipu_dp_csc_setup(int dp, struct dp_csc_param_t dp_csc_param,
 	const int (*coeff)[5][3];
 
 	if (dp_csc_param.mode >= 0) {
-		reg = __raw_readl(DP_COM_CONF(dp));
+		reg = __raw_readl(DP_COM_CONF());
 		reg &= ~DP_COM_CONF_CSC_DEF_MASK;
 		reg |= dp_csc_param.mode;
-		__raw_writel(reg, DP_COM_CONF(dp));
+		__raw_writel(reg, DP_COM_CONF());
 	}
 
 	coeff = dp_csc_param.coeff;
 
 	if (coeff) {
 		__raw_writel(mask_a((*coeff)[0][0]) |
-				(mask_a((*coeff)[0][1]) << 16), DP_CSC_A_0(dp));
+				(mask_a((*coeff)[0][1]) << 16), DP_CSC_A_0());
 		__raw_writel(mask_a((*coeff)[0][2]) |
-				(mask_a((*coeff)[1][0]) << 16), DP_CSC_A_1(dp));
+				(mask_a((*coeff)[1][0]) << 16), DP_CSC_A_1());
 		__raw_writel(mask_a((*coeff)[1][1]) |
-				(mask_a((*coeff)[1][2]) << 16), DP_CSC_A_2(dp));
+				(mask_a((*coeff)[1][2]) << 16), DP_CSC_A_2());
 		__raw_writel(mask_a((*coeff)[2][0]) |
-				(mask_a((*coeff)[2][1]) << 16), DP_CSC_A_3(dp));
+				(mask_a((*coeff)[2][1]) << 16), DP_CSC_A_3());
 		__raw_writel(mask_a((*coeff)[2][2]) |
 				(mask_b((*coeff)[3][0]) << 16) |
-				((*coeff)[4][0] << 30), DP_CSC_0(dp));
+				((*coeff)[4][0] << 30), DP_CSC_0());
 		__raw_writel(mask_b((*coeff)[3][1]) | ((*coeff)[4][1] << 14) |
 				(mask_b((*coeff)[3][2]) << 16) |
-				((*coeff)[4][2] << 30), DP_CSC_1(dp));
+				((*coeff)[4][2] << 30), DP_CSC_1());
 	}
 
 	if (srm_mode_update) {
@@ -479,7 +466,7 @@ int ipu_dp_init(ipu_channel_t channel, uint32_t in_pixel_fmt,
 	}
 
 	/* Transform color key from rgb to yuv if CSC is enabled */
-	reg = __raw_readl(DP_COM_CONF(dp));
+	reg = __raw_readl(DP_COM_CONF());
 	if (color_key_4rgb && (reg & DP_COM_CONF_GWCKE) &&
 		(((fg_csc_type == RGB2YUV) && (bg_csc_type == YUV2YUV)) ||
 		((fg_csc_type == YUV2YUV) && (bg_csc_type == RGB2YUV)) ||
@@ -487,7 +474,7 @@ int ipu_dp_init(ipu_channel_t channel, uint32_t in_pixel_fmt,
 		((fg_csc_type == YUV2RGB) && (bg_csc_type == YUV2RGB)))) {
 		int red, green, blue;
 		int y, u, v;
-		uint32_t color_key = __raw_readl(DP_GRAPH_WIND_CTRL(dp)) &
+		uint32_t color_key = __raw_readl(DP_GRAPH_WIND_CTRL()) &
 			0xFFFFFFL;
 
 		debug("_ipu_dp_init color key 0x%x need change to yuv fmt!\n",
@@ -502,8 +489,8 @@ int ipu_dp_init(ipu_channel_t channel, uint32_t in_pixel_fmt,
 		v = rgb_to_yuv(2, red, green, blue);
 		color_key = (y << 16) | (u << 8) | v;
 
-		reg = __raw_readl(DP_GRAPH_WIND_CTRL(dp)) & 0xFF000000L;
-		__raw_writel(reg | color_key, DP_GRAPH_WIND_CTRL(dp));
+		reg = __raw_readl(DP_GRAPH_WIND_CTRL()) & 0xFF000000L;
+		__raw_writel(reg | color_key, DP_GRAPH_WIND_CTRL());
 		color_key_4rgb = 0;
 
 		debug("_ipu_dp_init color key change to yuv fmt 0x%x!\n",
@@ -646,8 +633,8 @@ void ipu_dp_dc_enable(ipu_channel_t channel)
 
 	if (channel == MEM_FG_SYNC) {
 		/* Enable FG channel */
-		reg = __raw_readl(DP_COM_CONF(DP_SYNC));
-		__raw_writel(reg | DP_COM_CONF_FG_EN, DP_COM_CONF(DP_SYNC));
+		reg = __raw_readl(DP_COM_CONF());
+		__raw_writel(reg | DP_COM_CONF_FG_EN, DP_COM_CONF());
 
 		reg = __raw_readl(IPU_SRM_PRI2) | 0x8;
 		__raw_writel(reg, IPU_SRM_PRI2);
@@ -679,24 +666,27 @@ void ipu_dp_dc_disable(ipu_channel_t channel, unsigned char swap)
 	uint32_t csc;
 	uint32_t dc_chan = 0;
 	int timeout = 50;
+	int irq = 0;
 
 	dc_swap = swap;
 
 	if (channel == MEM_DC_SYNC) {
 		dc_chan = 1;
+		irq = IPU_IRQ_DC_FC_1;
 	} else if (channel == MEM_BG_SYNC) {
 		dc_chan = 5;
+		irq = IPU_IRQ_DP_SF_END;
 	} else if (channel == MEM_FG_SYNC) {
 		/* Disable FG channel */
 		dc_chan = 5;
 
-		reg = __raw_readl(DP_COM_CONF(DP_SYNC));
+		reg = __raw_readl(DP_COM_CONF());
 		csc = reg & DP_COM_CONF_CSC_DEF_MASK;
 		if (csc == DP_COM_CONF_CSC_DEF_FG)
 			reg &= ~DP_COM_CONF_CSC_DEF_MASK;
 
 		reg &= ~DP_COM_CONF_FG_EN;
-		__raw_writel(reg, DP_COM_CONF(DP_SYNC));
+		__raw_writel(reg, DP_COM_CONF());
 
 		reg = __raw_readl(IPU_SRM_PRI2) | 0x8;
 		__raw_writel(reg, IPU_SRM_PRI2);
@@ -736,25 +726,11 @@ void ipu_dp_dc_disable(ipu_channel_t channel, unsigned char swap)
 		reg ^= DC_WR_CH_CONF_PROG_DI_ID;
 		__raw_writel(reg, DC_WR_CH_CONF(dc_chan));
 	} else {
-		timeout = 50;
-
-		/* Wait for DC triple buffer to empty */
-		if (g_dc_di_assignment[dc_chan] == 0)
-			while ((__raw_readl(DC_STAT) & 0x00000002)
-				!= 0x00000002) {
-				udelay(2000);
-				timeout -= 2;
-				if (timeout <= 0)
-					break;
-			}
-		else if (g_dc_di_assignment[dc_chan] == 1)
-			while ((__raw_readl(DC_STAT) & 0x00000020)
-				!= 0x00000020) {
-				udelay(2000);
-				timeout -= 2;
-				if (timeout <= 0)
-					break;
-			}
+		/* Make sure that we leave at the irq starting edge */
+		__raw_writel(IPUIRQ_2_MASK(irq), IPUIRQ_2_STATREG(irq));
+		do {
+			reg = __raw_readl(IPUIRQ_2_STATREG(irq));
+		} while (!(reg & IPUIRQ_2_MASK(irq)));
 
 		reg = __raw_readl(DC_WR_CH_CONF(dc_chan));
 		reg &= ~DC_WR_CH_CONF_PROG_TYPE_MASK;
@@ -902,7 +878,7 @@ int32_t ipu_init_sync_panel(int disp, uint32_t pixel_clk,
 	debug("panel size = %d x %d\n", width, height);
 
 	if ((v_sync_width == 0) || (h_sync_width == 0))
-		return EINVAL;
+		return -EINVAL;
 
 	adapt_panel_to_ipu_restricitions(&pixel_clk, width, height,
 					 h_start_width, h_end_width,
@@ -912,9 +888,6 @@ int32_t ipu_init_sync_panel(int disp, uint32_t pixel_clk,
 
 	/* Init clocking */
 	debug("pixel clk = %d\n", pixel_clk);
-
-	/* clear DI */
-	__raw_writel((1 << 21), DI_GENERAL(disp));
 
 	if (sig.ext_clk) {
 		if (!(g_di1_tvout && (disp == 1))) { /*not round div for tvout*/
@@ -928,23 +901,21 @@ int32_t ipu_init_sync_panel(int disp, uint32_t pixel_clk,
 				rounded_pixel_clk =
 					clk_round_rate(g_pixel_clk[disp],
 						pixel_clk);
-				if (di_parent != NULL) {
-					div  = clk_get_rate(di_parent) /
-						rounded_pixel_clk;
-					if (div % 2)
-						div++;
-					if (clk_get_rate(di_parent) != div *
-						rounded_pixel_clk)
-						clk_set_rate(di_parent,
-							div * rounded_pixel_clk);
-					udelay(10000);
-					clk_set_rate(g_di_clk[disp],
-						2 * rounded_pixel_clk);
-					udelay(10000);
-				}
+				div  = clk_get_rate(di_parent) /
+					rounded_pixel_clk;
+				if (div % 2)
+					div++;
+				if (clk_get_rate(di_parent) != div *
+					rounded_pixel_clk)
+					clk_set_rate(di_parent,
+						div * rounded_pixel_clk);
+				udelay(10000);
+				clk_set_rate(g_di_clk[disp],
+					2 * rounded_pixel_clk);
+				udelay(10000);
 			}
 		}
-		clk_set_parent(g_pixel_clk[disp], g_di_clk[disp]);
+		clk_set_parent(g_pixel_clk[disp], g_ldb_clk);
 	} else {
 		if (clk_get_usecount(g_pixel_clk[disp]) != 0)
 			clk_set_parent(g_pixel_clk[disp], g_ipu_clk);
@@ -955,14 +926,6 @@ int32_t ipu_init_sync_panel(int disp, uint32_t pixel_clk,
 	/* Get integer portion of divider */
 	div = clk_get_rate(clk_get_parent(g_pixel_clk[disp])) /
 		rounded_pixel_clk;
-
-	/* Enable for a divide by 2 clock change. */
-	reg = __raw_readl(IPU_PM);
-	reg &= ~(0x7f << 7);
-	reg |= 0x20 << 7;
-	reg &= ~(0x7f << 23);
-	reg |= 0x20 << 23;
-	__raw_writel(reg, IPU_PM);
 
 	ipu_di_data_wave_config(disp, SYNC_WAVE, div - 1, div - 1);
 	ipu_di_data_pin_config(disp, SYNC_WAVE, DI_PIN15, 3, 0, div * 2);
@@ -1188,11 +1151,6 @@ int32_t ipu_init_sync_panel(int disp, uint32_t pixel_clk,
 		__raw_writel(0, DI_STP_REP(disp, 7));
 		__raw_writel(0, DI_STP_REP(disp, 9));
 
-		h_total = ((width + h_start_width + h_sync_width) / 2) - 2;
-		ipu_di_sync_config(disp, 6, 1, 0, 2, DI_SYNC_CLK, h_total,
-				DI_SYNC_INT_HSYNC, 0, DI_SYNC_NONE,
-				DI_SYNC_NONE, 0, 0);
-
 		/* Init template microcode */
 		if (disp) {
 		   ipu_dc_write_tmpl(2, WROD(0), 0, map, SYNC_WAVE, 8, 5);
@@ -1209,21 +1167,15 @@ int32_t ipu_init_sync_panel(int disp, uint32_t pixel_clk,
 		if (sig.Vsync_pol)
 			di_gen |= DI_GEN_POLARITY_3;
 
-		if (sig.clk_pol)
+		if (!sig.clk_pol)
 			di_gen |= DI_GEN_POL_CLK;
 
-		/* Set the clock to stop at counter 6. */
-		di_gen |= 0x6000000;
 	}
 
 	__raw_writel(di_gen, DI_GENERAL(disp));
 
-	if (sig.interlaced)
-		__raw_writel((--vsync_cnt << DI_VSYNC_SEL_OFFSET) |
-				0x00000002, DI_SYNC_AS_GEN(disp));
-	else
-		__raw_writel((--vsync_cnt << DI_VSYNC_SEL_OFFSET),
-				DI_SYNC_AS_GEN(disp));
+	__raw_writel((--vsync_cnt << DI_VSYNC_SEL_OFFSET) |
+			0x00000002, DI_SYNC_AS_GEN(disp));
 
 	reg = __raw_readl(DI_POL(disp));
 	reg &= ~(DI_POL_DRDY_DATA_POLARITY | DI_POL_DRDY_POLARITY_15);
@@ -1256,17 +1208,12 @@ int32_t ipu_disp_set_global_alpha(ipu_channel_t channel, unsigned char enable,
 				  uint8_t alpha)
 {
 	uint32_t reg;
-	uint32_t flow;
 
 	unsigned char bg_chan;
 
-	if (channel == MEM_BG_SYNC || channel == MEM_FG_SYNC)
-		flow = DP_SYNC;
-	else if (channel == MEM_BG_ASYNC0 || channel == MEM_FG_ASYNC0)
-		flow = DP_ASYNC0;
-	else if (channel == MEM_BG_ASYNC1 || channel == MEM_FG_ASYNC1)
-		flow = DP_ASYNC1;
-	else
+	if (!((channel == MEM_BG_SYNC || channel == MEM_FG_SYNC) ||
+		(channel == MEM_BG_ASYNC0 || channel == MEM_FG_ASYNC0) ||
+		(channel == MEM_BG_ASYNC1 || channel == MEM_FG_ASYNC1)))
 		return -EINVAL;
 
 	if (channel == MEM_BG_SYNC || channel == MEM_BG_ASYNC0 ||
@@ -1279,23 +1226,23 @@ int32_t ipu_disp_set_global_alpha(ipu_channel_t channel, unsigned char enable,
 		clk_enable(g_ipu_clk);
 
 	if (bg_chan) {
-		reg = __raw_readl(DP_COM_CONF(flow));
-		__raw_writel(reg & ~DP_COM_CONF_GWSEL, DP_COM_CONF(flow));
+		reg = __raw_readl(DP_COM_CONF());
+		__raw_writel(reg & ~DP_COM_CONF_GWSEL, DP_COM_CONF());
 	} else {
-		reg = __raw_readl(DP_COM_CONF(flow));
-		__raw_writel(reg | DP_COM_CONF_GWSEL, DP_COM_CONF(flow));
+		reg = __raw_readl(DP_COM_CONF());
+		__raw_writel(reg | DP_COM_CONF_GWSEL, DP_COM_CONF());
 	}
 
 	if (enable) {
-		reg = __raw_readl(DP_GRAPH_WIND_CTRL(flow)) & 0x00FFFFFFL;
+		reg = __raw_readl(DP_GRAPH_WIND_CTRL()) & 0x00FFFFFFL;
 		__raw_writel(reg | ((uint32_t) alpha << 24),
-			     DP_GRAPH_WIND_CTRL(flow));
+			     DP_GRAPH_WIND_CTRL());
 
-		reg = __raw_readl(DP_COM_CONF(flow));
-		__raw_writel(reg | DP_COM_CONF_GWAM, DP_COM_CONF(flow));
+		reg = __raw_readl(DP_COM_CONF());
+		__raw_writel(reg | DP_COM_CONF_GWAM, DP_COM_CONF());
 	} else {
-		reg = __raw_readl(DP_COM_CONF(flow));
-		__raw_writel(reg & ~DP_COM_CONF_GWAM, DP_COM_CONF(flow));
+		reg = __raw_readl(DP_COM_CONF());
+		__raw_writel(reg & ~DP_COM_CONF_GWAM, DP_COM_CONF());
 	}
 
 	reg = __raw_readl(IPU_SRM_PRI2) | 0x8;
@@ -1321,17 +1268,13 @@ int32_t ipu_disp_set_global_alpha(ipu_channel_t channel, unsigned char enable,
 int32_t ipu_disp_set_color_key(ipu_channel_t channel, unsigned char enable,
 			       uint32_t color_key)
 {
-	uint32_t reg, flow;
+	uint32_t reg;
 	int y, u, v;
 	int red, green, blue;
 
-	if (channel == MEM_BG_SYNC || channel == MEM_FG_SYNC)
-		flow = DP_SYNC;
-	else if (channel == MEM_BG_ASYNC0 || channel == MEM_FG_ASYNC0)
-		flow = DP_ASYNC0;
-	else if (channel == MEM_BG_ASYNC1 || channel == MEM_FG_ASYNC1)
-		flow = DP_ASYNC1;
-	else
+	if (!((channel == MEM_BG_SYNC || channel == MEM_FG_SYNC) ||
+		(channel == MEM_BG_ASYNC0 || channel == MEM_FG_ASYNC0) ||
+		(channel == MEM_BG_ASYNC1 || channel == MEM_FG_ASYNC1)))
 		return -EINVAL;
 
 	if (!g_ipu_clk_enabled)
@@ -1361,14 +1304,14 @@ int32_t ipu_disp_set_color_key(ipu_channel_t channel, unsigned char enable,
 	}
 
 	if (enable) {
-		reg = __raw_readl(DP_GRAPH_WIND_CTRL(flow)) & 0xFF000000L;
-		__raw_writel(reg | color_key, DP_GRAPH_WIND_CTRL(flow));
+		reg = __raw_readl(DP_GRAPH_WIND_CTRL()) & 0xFF000000L;
+		__raw_writel(reg | color_key, DP_GRAPH_WIND_CTRL());
 
-		reg = __raw_readl(DP_COM_CONF(flow));
-		__raw_writel(reg | DP_COM_CONF_GWCKE, DP_COM_CONF(flow));
+		reg = __raw_readl(DP_COM_CONF());
+		__raw_writel(reg | DP_COM_CONF_GWCKE, DP_COM_CONF());
 	} else {
-		reg = __raw_readl(DP_COM_CONF(flow));
-		__raw_writel(reg & ~DP_COM_CONF_GWCKE, DP_COM_CONF(flow));
+		reg = __raw_readl(DP_COM_CONF());
+		__raw_writel(reg & ~DP_COM_CONF_GWCKE, DP_COM_CONF());
 	}
 
 	reg = __raw_readl(IPU_SRM_PRI2) | 0x8;

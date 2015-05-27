@@ -16,7 +16,6 @@
     along with this program; if not, write to the Free Software
     Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
-#include <linux/module.h>
 #include <linux/elf.h>
 #include <linux/moduleloader.h>
 #include <linux/err.h>
@@ -26,24 +25,9 @@
 #include <asm/uaccess.h>
 #include <asm/firmware.h>
 #include <linux/sort.h>
-
-#include "setup.h"
+#include <asm/setup.h>
 
 LIST_HEAD(module_bug_list);
-
-void *module_alloc(unsigned long size)
-{
-	if (size == 0)
-		return NULL;
-
-	return vmalloc_exec(size);
-}
-
-/* Free memory returned from module_alloc */
-void module_free(struct module *mod, void *module_region)
-{
-	vfree(module_region);
-}
 
 static const Elf_Shdr *find_section(const Elf_Ehdr *hdr,
 				    const Elf_Shdr *sechdrs,
@@ -92,8 +76,4 @@ int module_finalize(const Elf_Ehdr *hdr,
 				 (void *)sect->sh_addr + sect->sh_size);
 
 	return 0;
-}
-
-void module_arch_cleanup(struct module *mod)
-{
 }

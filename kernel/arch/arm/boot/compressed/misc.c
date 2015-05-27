@@ -18,19 +18,14 @@
 
 unsigned int __machine_arch_type;
 
-#define _LINUX_STRING_H_
-
 #include <linux/compiler.h>	/* for inline */
-#include <linux/types.h>	/* for size_t */
-#include <linux/stddef.h>	/* for NULL */
+#include <linux/types.h>
 #include <linux/linkage.h>
-#include <asm/string.h>
-
 
 static void putstr(const char *ptr);
 extern void error(char *x);
 
-#include <mach/uncompress.h>
+#include CONFIG_UNCOMPRESS_INCLUDE
 
 #ifdef CONFIG_DEBUG_ICEDCC
 
@@ -101,41 +96,6 @@ static void putstr(const char *ptr)
 	flush();
 }
 
-
-void *memcpy(void *__dest, __const void *__src, size_t __n)
-{
-	int i = 0;
-	unsigned char *d = (unsigned char *)__dest, *s = (unsigned char *)__src;
-
-	for (i = __n >> 3; i > 0; i--) {
-		*d++ = *s++;
-		*d++ = *s++;
-		*d++ = *s++;
-		*d++ = *s++;
-		*d++ = *s++;
-		*d++ = *s++;
-		*d++ = *s++;
-		*d++ = *s++;
-	}
-
-	if (__n & 1 << 2) {
-		*d++ = *s++;
-		*d++ = *s++;
-		*d++ = *s++;
-		*d++ = *s++;
-	}
-
-	if (__n & 1 << 1) {
-		*d++ = *s++;
-		*d++ = *s++;
-	}
-
-	if (__n & 1)
-		*d++ = *s++;
-
-	return __dest;
-}
-
 /*
  * gzip declarations
  */
@@ -167,6 +127,18 @@ asmlinkage void __div0(void)
 	error("Attempting division by 0!");
 }
 
+unsigned long __stack_chk_guard;
+
+void __stack_chk_guard_setup(void)
+{
+	__stack_chk_guard = 0x000a0dff;
+}
+
+void __stack_chk_fail(void)
+{
+	error("stack-protector: Kernel stack is corrupted\n");
+}
+
 extern int do_decompress(u8 *input, int len, u8 *output, void (*error)(char *x));
 
 
@@ -176,6 +148,8 @@ decompress_kernel(unsigned long output_start, unsigned long free_mem_ptr_p,
 		int arch_id)
 {
 	int ret;
+
+	__stack_chk_guard_setup();
 
 	output_data		= (unsigned char *)output_start;
 	free_mem_ptr		= free_mem_ptr_p;

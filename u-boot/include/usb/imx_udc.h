@@ -1,28 +1,7 @@
 /*
- * Copyright (C) 2010-2012 Freescale Semiconductor, Inc.
+ * Copyright (C) 2010-2014 Freescale Semiconductor, Inc. All Rights Reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
- * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 #ifndef _IMX_UDC_H_
@@ -83,31 +62,69 @@
 /*
  * other regs (not part of ARC core)
  */
-#define USBCTRL			USBOTHER_REG(0x00)	/* USB Control register */
-#define USB_OTG_MIRROR		USBOTHER_REG(0x04)	/* USB OTG mirror register */
-#define USB_PHY_CTR_FUNC	USBOTHER_REG(0x08)      /* OTG UTMI PHY Function Control register */
-#define USB_PHY_CTR_FUNC2	USBOTHER_REG(0x0c)      /* OTG UTMI PHY Function Control register */
-#define USB_CTRL_1		USBOTHER_REG(0x10)	/* USB Cotrol Register 1*/
+/* USB Control register */
+#define USBCTRL			USBOTHER_REG(0x00)
+
+/* USB OTG mirror register */
+#define USB_OTG_MIRROR		USBOTHER_REG(0x04)
+
+/* OTG UTMI PHY Function Control register */
+#define USB_PHY_CTR_FUNC	USBOTHER_REG(0x08)
+
+/* OTG UTMI PHY Function Control register */
+#define USB_PHY_CTR_FUNC2	USBOTHER_REG(0x0c)
+
+#define USB_CTRL_1		USBOTHER_REG(0x10)
 #define USBCTRL_HOST2		USBOTHER_REG(0x14)	/* USB Cotrol Register 1*/
 #define USBCTRL_HOST3		USBOTHER_REG(0x18)	/* USB Cotrol Register 1*/
 #define USBH1_PHY_CTRL0		USBOTHER_REG(0x1c)	/* USB Cotrol Register 1*/
 #define USBH1_PHY_CTRL1		USBOTHER_REG(0x20)	/* USB Cotrol Register 1*/
-#define USB_CLKONOFF_CTRL       USBOTHER_REG(0x24)      /* USB Clock on/off Control Register */
+
+/* USB Clock on/off Control Register */
+#define USB_CLKONOFF_CTRL       USBOTHER_REG(0x24)
+
 /* mx6x other regs */
-#define USB_OTG_CTRL			USBOTHER_REG(0x00)	/* USB OTG Control register */
-#define USB_H1_CTRL			USBOTHER_REG(0x04)	/* USB H1 Control register */
-#define USB_H2_CTRL			USBOTHER_REG(0x08)	/* USB H2 Control register */
-#define USB_H3_CTRL			USBOTHER_REG(0x0c)	/* USB H3 Control register */
-#define USB_UH2_HSIC_CTRL		USBOTHER_REG(0x10)	/* USB Host2 HSIC Control Register */
-#define USB_UH3_HSIC_CTRL		USBOTHER_REG(0x14)	/* USB Host3 HSIC Control Register */
-#define USB_OTG_PHY_CTRL_0		USBOTHER_REG(0x18)	/* OTG UTMI PHY Control 0 Register */
-#define USB_H1_PHY_CTRL_0		USBOTHER_REG(0x1c)	/* OTG UTMI PHY Control 1 Register */
-#define USB_UH2_HSIC_DLL_CFG1		USBOTHER_REG(0x20)      /* USB Host2 HSIC DLL Configuration Register 1 */
-#define USB_UH2_HSIC_DLL_CFG2		USBOTHER_REG(0x24)      /* USB Host2 HSIC DLL Configuration Register 2 */
-#define USB_UH2_HSIC_DLL_CFG3		USBOTHER_REG(0x28)      /* USB Host2 HSIC DLL Configuration Register 3 */
-#define USB_UH3_HSIC_DLL_CFG1		USBOTHER_REG(0x30)      /* USB Host3 HSIC DLL Configuration Register 1 */
-#define USB_UH3_HSIC_DLL_CFG2		USBOTHER_REG(0x34)      /* USB Host3 HSIC DLL Configuration Register 2 */
-#define USB_UH3_HSIC_DLL_CFG3		USBOTHER_REG(0x38)      /* USB Host3 HSIC DLL Configuration Register 3 */
+/* USB OTG Control register */
+#define USB_OTG_CTRL			USBOTHER_REG(0x00)
+
+/* USB H1 Control register */
+#define USB_H1_CTRL			USBOTHER_REG(0x04)
+
+/* USB H2 Control register */
+#define USB_H2_CTRL			USBOTHER_REG(0x08)
+
+/* USB H3 Control register */
+#define USB_H3_CTRL			USBOTHER_REG(0x0c)
+
+/* USB Host2 HSIC Control Register */
+#define USB_UH2_HSIC_CTRL		USBOTHER_REG(0x10)
+
+/* USB Host3 HSIC Control Register */
+#define USB_UH3_HSIC_CTRL		USBOTHER_REG(0x14)
+
+/* OTG UTMI PHY Control 0 Register */
+#define USB_OTG_PHY_CTRL_0		USBOTHER_REG(0x18)
+
+/* OTG UTMI PHY Control 1 Register */
+#define USB_H1_PHY_CTRL_0		USBOTHER_REG(0x1c)
+
+/* USB Host2 HSIC DLL Configuration Register 1 */
+#define USB_UH2_HSIC_DLL_CFG1		USBOTHER_REG(0x20)
+
+/* USB Host2 HSIC DLL Configuration Register 2 */
+#define USB_UH2_HSIC_DLL_CFG2		USBOTHER_REG(0x24)
+
+/* USB Host2 HSIC DLL Configuration Register 3 */
+#define USB_UH2_HSIC_DLL_CFG3		USBOTHER_REG(0x28)
+
+/* USB Host3 HSIC DLL Configuration Register 1 */
+#define USB_UH3_HSIC_DLL_CFG1		USBOTHER_REG(0x30)
+
+/* USB Host3 HSIC DLL Configuration Register 2 */
+#define USB_UH3_HSIC_DLL_CFG2		USBOTHER_REG(0x34)
+
+/* USB Host3 HSIC DLL Configuration Register 3 */
+#define USB_UH3_HSIC_DLL_CFG3		USBOTHER_REG(0x38)
 
 
 #define USB_PHY1_CTRL        (OTG_BASE_ADDR + 0x80C)
@@ -146,9 +163,9 @@ struct ep_queue_item {
 	volatile unsigned int page2;
 	volatile unsigned int page3;
 	volatile unsigned int page4;
-	unsigned int item_dma;
+	unsigned int item_unaligned_addr;
 	unsigned int page_vir;
-	unsigned int page_dma;
+	unsigned int page_unaligned;
 	struct ep_queue_item *next_item_vir;
 	volatile unsigned int reserved[5];
 };
@@ -452,7 +469,8 @@ struct ep_queue_item {
 #define UCTRL_WKUP_ID_EN	(1 << 16)	/* OTG wake-up on ID change enable */
 #define UCTRL_WKUP_SW		(1 << 15)	/* OTG Software Wake-up */
 #define UCTRL_WKUP_SW_EN	(1 << 14)	/* OTG Software Wake-up enable */
-#define UCTRL_UTMI_ON_CLOCK	(1 << 13)	/* Force OTG UTMI PHY clock output on even if suspend mode */
+#define UCTRL_UTMI_ON_CLOCK	(1 << 13)	/* Force OTG UTMI PHY clock output
+										     on even if suspend mode */
 #define UCTRL_SUSPENDM		(1 << 12)	/* Force OTG UTMI PHY Suspend */
 #define UCTRL_RESET		(1 << 11)	/* Force OTG UTMI PHY Reset */
 #define UCTRL_OWIE		(1 << 10)	/* OTG wakeup intr request received */
@@ -468,7 +486,7 @@ struct ep_queue_item {
 						 * even when in Host is in suspend mode
 						 */
 /* OTG/HOST1 Phy Ctrl */
-#define PHY_UTMI_CLK_VLD	(1 << 31)	/* Indicating whether OTG UTMI PHY Clock Valida */
+#define PHY_UTMI_CLK_VLD	(1 << 31)/* Indicating whether OTG UTMI PHY Clock Valid*/
 
 int  udc_init(void);
 
@@ -492,6 +510,12 @@ void set_usb_phy1_clk(void);
 void enable_usb_phy1_clk(unsigned char enable);
 void enable_usboh3_clk(unsigned char enable);
 void udc_pins_setting(void);
+
+/*destroy functions*/
+void udc_destroy_ep(struct usb_device_instance *device,
+		    struct usb_endpoint_instance *epi);
+int udc_destroy(void);
+
 
 #ifdef CONFIG_FASTBOOT
 

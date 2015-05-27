@@ -1,5 +1,5 @@
 /*
- * Copyright 2004-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright 2004-2015 Freescale Semiconductor, Inc. All Rights Reserved.
  */
 
 /*
@@ -26,28 +26,29 @@
 /*!
  * Include files
  */
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/platform_device.h>
-#include <linux/sched.h>
-#include <linux/errno.h>
-#include <linux/string.h>
-#include <linux/interrupt.h>
-#include <linux/slab.h>
-#include <linux/fb.h>
-#include <linux/delay.h>
-#include <linux/init.h>
-#include <linux/ioport.h>
-#include <linux/dma-mapping.h>
 #include <linux/clk.h>
 #include <linux/console.h>
-#include <linux/io.h>
-#include <linux/ipu.h>
-#include <linux/mxcfb.h>
-#include <linux/uaccess.h>
+#include <linux/delay.h>
+#include <linux/dma-mapping.h>
+#include <linux/errno.h>
+#include <linux/fb.h>
 #include <linux/fsl_devices.h>
-#include <asm/mach-types.h>
-#include <mach/ipu-v3.h>
+#include <linux/init.h>
+#include <linux/interrupt.h>
+#include <linux/io.h>
+#include <linux/ioport.h>
+#include <linux/ipu.h>
+#include <linux/ipu-v3.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/mxcfb.h>
+#include <linux/of_device.h>
+#include <linux/platform_device.h>
+#include <linux/sched.h>
+#include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
+
 #include "mxc_dispdrv.h"
 
 /*
@@ -444,6 +445,13 @@ static int mxcfb_set_par(struct fb_info *fbi)
 	struct mxcfb_info *mxc_fbi_fg = NULL;
 	bool ovfbi_enable = false;
 
+	if (ipu_ch_param_bad_alpha_pos(fbi_to_pixfmt(fbi)) &&
+	    mxc_fbi->alpha_chan_en) {
+		dev_err(fbi->device, "Bad pixel format for "
+				"graphics plane fb\n");
+		return -EINVAL;
+	}
+
 	if (mxc_fbi->ovfbi)
 		mxc_fbi_fg = (struct mxcfb_info *)mxc_fbi->ovfbi->par;
 
@@ -647,7 +655,7 @@ static int mxcfb_set_par(struct fb_info *fbi)
 		ipu_enable_channel(mxc_fbi_fg->ipu, mxc_fbi_fg->ipu_ch);
 
 	if (mxc_fbi->dispdrv && mxc_fbi->dispdrv->drv->enable) {
-		retval = mxc_fbi->dispdrv->drv->enable(mxc_fbi->dispdrv);
+		retval = mxc_fbi->dispdrv->drv->enable(mxc_fbi->dispdrv, fbi);
 		if (retval < 0) {
 			dev_err(fbi->device, "enable error, dispdrv:%s.\n",
 					mxc_fbi->dispdrv->drv->name);
@@ -985,21 +993,24 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 	case MXCFB_SET_LOC_ALPHA:
 		{
 			struct mxcfb_loc_alpha la;
+			bool bad_pixfmt =
+				ipu_ch_param_bad_alpha_pos(fbi_to_pixfmt(fbi));
 
 			if (copy_from_user(&la, (void *)arg, sizeof(la))) {
 				retval = -EFAULT;
 				break;
 			}
 
-			if (ipu_disp_set_global_alpha(mxc_fbi->ipu, mxc_fbi->ipu_ch,
-						      !(bool)la.enable, 0)) {
-				retval = -EINVAL;
-				break;
-			}
-
 			if (la.enable && !la.alpha_in_pixel) {
 				struct fb_info *fbi_tmp;
 				ipu_channel_t ipu_ch;
+
+				if (bad_pixfmt) {
+					dev_err(fbi->device, "Bad pixel format "
+						"for graphics plane fb\n");
+					retval = -EINVAL;
+					break;
+				}
 
 				mxc_fbi->alpha_chan_en = true;
 
@@ -1017,6 +1028,13 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 					((struct mxcfb_info *)(fbi_tmp->par))->alpha_chan_en = false;
 			} else
 				mxc_fbi->alpha_chan_en = false;
+
+			if (ipu_disp_set_global_alpha(mxc_fbi->ipu,
+						      mxc_fbi->ipu_ch,
+						      !(bool)la.enable, 0)) {
+				retval = -EINVAL;
+				break;
+			}
 
 			fbi->var.activate = (fbi->var.activate & ~FB_ACTIVATE_MASK) |
 						FB_ACTIVATE_NOW | FB_ACTIVATE_FORCE;
@@ -1333,6 +1351,7 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 				return -EFAULT;
 			ipu_set_csc_coefficients(mxc_fbi->ipu, mxc_fbi->ipu_ch,
 						csc.param);
+			break;
 		}
 	default:
 		retval = -EINVAL;
@@ -1362,7 +1381,7 @@ static int mxcfb_blank(int blank, struct fb_info *info)
 	case FB_BLANK_HSYNC_SUSPEND:
 	case FB_BLANK_NORMAL:
 		if (mxc_fbi->dispdrv && mxc_fbi->dispdrv->drv->disable)
-			mxc_fbi->dispdrv->drv->disable(mxc_fbi->dispdrv);
+			mxc_fbi->dispdrv->drv->disable(mxc_fbi->dispdrv, info);
 		ipu_disable_channel(mxc_fbi->ipu, mxc_fbi->ipu_ch, true);
 		if (mxc_fbi->ipu_di >= 0)
 			ipu_uninit_sync_panel(mxc_fbi->ipu, mxc_fbi->ipu_di);
@@ -1593,7 +1612,7 @@ static int mxcfb_mmap(struct fb_info *fbi, struct vm_area_struct *vma)
 	/* make buffers bufferable */
 	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 
-	vma->vm_flags |= VM_IO | VM_RESERVED;
+	vma->vm_flags |= VM_IO;
 
 	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
 			    vma->vm_end - vma->vm_start, vma->vm_page_prot)) {
@@ -1856,7 +1875,8 @@ static ssize_t swap_disp_chan(struct device *dev,
 	console_unlock();
 	return count;
 }
-static DEVICE_ATTR(fsl_disp_property, 644, show_disp_chan, swap_disp_chan);
+static DEVICE_ATTR(fsl_disp_property, S_IWUSR | S_IRUGO,
+		   show_disp_chan, swap_disp_chan);
 
 static ssize_t show_disp_dev(struct device *dev,
 			     struct device_attribute *attr, char *buf)
@@ -1870,6 +1890,22 @@ static ssize_t show_disp_dev(struct device *dev,
 		return sprintf(buf, "%s\n", mxcfbi->dispdrv->drv->name);
 }
 static DEVICE_ATTR(fsl_disp_dev_property, S_IRUGO, show_disp_dev, NULL);
+
+static int mxcfb_get_crtc(struct device *dev, struct mxcfb_info *mxcfbi,
+			  enum crtc crtc)
+{
+	int i = 0;
+
+	for (; i < ARRAY_SIZE(ipu_di_crtc_maps); i++)
+		if (ipu_di_crtc_maps[i].crtc == crtc) {
+			mxcfbi->ipu_id = ipu_di_crtc_maps[i].ipu_id;
+			mxcfbi->ipu_di = ipu_di_crtc_maps[i].ipu_di;
+			return 0;
+		}
+
+	dev_err(dev, "failed to get valid crtc\n");
+	return -EINVAL;
+}
 
 static int mxcfb_dispdrv_init(struct platform_device *pdev,
 		struct fb_info *fbi)
@@ -1895,8 +1931,6 @@ static int mxcfb_dispdrv_init(struct platform_device *pdev,
 		disp_dev[strlen(plat_data->disp_dev)] = '\0';
 	}
 
-	dev_info(&pdev->dev, "register mxc display driver %s\n", disp_dev);
-
 	mxcfbi->dispdrv = mxc_dispdrv_gethandle(disp_dev, &setting);
 	if (IS_ERR(mxcfbi->dispdrv)) {
 		ret = PTR_ERR(mxcfbi->dispdrv);
@@ -1907,10 +1941,16 @@ static int mxcfb_dispdrv_init(struct platform_device *pdev,
 		mxcfbi->ipu_di_pix_fmt = setting.if_fmt;
 		mxcfbi->default_bpp = setting.default_bpp;
 
-		/* setting */
-		mxcfbi->ipu_id = setting.dev_id;
-		mxcfbi->ipu_di = setting.disp_id;
+		ret = mxcfb_get_crtc(&pdev->dev, mxcfbi, setting.crtc);
+		if (ret)
+			return ret;
+
+		dev_dbg(&pdev->dev, "di_pixfmt:0x%x, bpp:0x%x, di:%d, ipu:%d\n",
+				setting.if_fmt, setting.default_bpp,
+				mxcfbi->ipu_di, mxcfbi->ipu_id);
 	}
+
+	dev_info(&pdev->dev, "registered mxc display driver %s\n", disp_dev);
 
 	return ret;
 }
@@ -2230,6 +2270,84 @@ static void ipu_clear_usage(int ipu, int di)
 	ipu_usage[ipu][di] = false;
 }
 
+static int mxcfb_get_of_property(struct platform_device *pdev,
+				struct ipuv3_fb_platform_data *plat_data)
+{
+	struct device_node *np = pdev->dev.of_node;
+	const char *disp_dev;
+	const char *mode_str = NULL;
+	const char *pixfmt;
+	int err;
+	int len;
+	u32 bpp, int_clk;
+	u32 late_init;
+
+	err = of_property_read_string(np, "disp_dev", &disp_dev);
+	if (err < 0) {
+		dev_dbg(&pdev->dev, "get of property disp_dev fail\n");
+		return err;
+	}
+	err = of_property_read_string(np, "mode_str", &mode_str);
+	if (err < 0)
+		dev_dbg(&pdev->dev, "get of property mode_str fail\n");
+	err = of_property_read_string(np, "interface_pix_fmt", &pixfmt);
+	if (err) {
+		dev_dbg(&pdev->dev, "get of property pix fmt fail\n");
+		return err;
+	}
+	err = of_property_read_u32(np, "default_bpp", &bpp);
+	if (err) {
+		dev_dbg(&pdev->dev, "get of property bpp fail\n");
+		return err;
+	}
+	err = of_property_read_u32(np, "int_clk", &int_clk);
+	if (err) {
+		dev_dbg(&pdev->dev, "get of property int_clk fail\n");
+		return err;
+	}
+	err = of_property_read_u32(np, "late_init", &late_init);
+	if (err) {
+		dev_dbg(&pdev->dev, "get of property late_init fail\n");
+		return err;
+	}
+
+	if (!strncmp(pixfmt, "RGB24", 5))
+		plat_data->interface_pix_fmt = IPU_PIX_FMT_RGB24;
+	else if (!strncmp(pixfmt, "BGR24", 5))
+		plat_data->interface_pix_fmt = IPU_PIX_FMT_BGR24;
+	else if (!strncmp(pixfmt, "GBR24", 5))
+		plat_data->interface_pix_fmt = IPU_PIX_FMT_GBR24;
+	else if (!strncmp(pixfmt, "RGB565", 6))
+		plat_data->interface_pix_fmt = IPU_PIX_FMT_RGB565;
+	else if (!strncmp(pixfmt, "RGB666", 6))
+		plat_data->interface_pix_fmt = IPU_PIX_FMT_RGB666;
+	else if (!strncmp(pixfmt, "YUV444", 6))
+		plat_data->interface_pix_fmt = IPU_PIX_FMT_YUV444;
+	else if (!strncmp(pixfmt, "LVDS666", 7))
+		plat_data->interface_pix_fmt = IPU_PIX_FMT_LVDS666;
+	else if (!strncmp(pixfmt, "YUYV16", 6))
+		plat_data->interface_pix_fmt = IPU_PIX_FMT_YUYV;
+	else if (!strncmp(pixfmt, "UYVY16", 6))
+		plat_data->interface_pix_fmt = IPU_PIX_FMT_UYVY;
+	else if (!strncmp(pixfmt, "YVYU16", 6))
+		plat_data->interface_pix_fmt = IPU_PIX_FMT_YVYU;
+	else if (!strncmp(pixfmt, "VYUY16", 6))
+				plat_data->interface_pix_fmt = IPU_PIX_FMT_VYUY;
+	else {
+		dev_err(&pdev->dev, "err interface_pix_fmt!\n");
+		return -ENOENT;
+	}
+
+	len = min(sizeof(plat_data->disp_dev) - 1, strlen(disp_dev));
+	memcpy(plat_data->disp_dev, disp_dev, len);
+	plat_data->disp_dev[len] = '\0';
+	plat_data->mode_str = (char *)mode_str;
+	plat_data->default_bpp = bpp;
+	plat_data->int_clk = (bool)int_clk;
+	plat_data->late_init = (bool)late_init;
+	return err;
+}
+
 /*!
  * Probe routine for the framebuffer driver. It is called during the
  * driver binding process.      The following functions are performed in
@@ -2240,11 +2358,30 @@ static void ipu_clear_usage(int ipu, int di)
  */
 static int mxcfb_probe(struct platform_device *pdev)
 {
-	struct ipuv3_fb_platform_data *plat_data = pdev->dev.platform_data;
+	struct ipuv3_fb_platform_data *plat_data;
 	struct fb_info *fbi;
 	struct mxcfb_info *mxcfbi;
 	struct resource *res;
 	int ret = 0;
+
+	dev_dbg(&pdev->dev, "%s enter\n", __func__);
+	pdev->id = of_alias_get_id(pdev->dev.of_node, "mxcfb");
+	if (pdev->id < 0) {
+		dev_err(&pdev->dev, "can not get alias id\n");
+		return pdev->id;
+	}
+
+	plat_data = devm_kzalloc(&pdev->dev, sizeof(struct
+					ipuv3_fb_platform_data), GFP_KERNEL);
+	if (!plat_data)
+		return -ENOMEM;
+	pdev->dev.platform_data = plat_data;
+
+	ret = mxcfb_get_of_property(pdev, plat_data);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "get mxcfb of property fail\n");
+		return ret;
+	}
 
 	/* Initialize FB structures */
 	fbi = mxcfb_init_fbinfo(&pdev->dev, &mxcfb_ops);
@@ -2355,11 +2492,6 @@ static int mxcfb_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Error %d on creating file for disp "
 				    " device propety\n", ret);
 
-#ifdef CONFIG_LOGO
-	fb_prepare_logo(fbi, 0);
-	fb_show_logo(fbi, 0);
-#endif
-
 	return 0;
 
 mxcfb_setupoverlay_failed:
@@ -2406,13 +2538,19 @@ static int mxcfb_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct of_device_id imx_mxcfb_dt_ids[] = {
+	{ .compatible = "fsl,mxc_sdc_fb"},
+	{ /* sentinel */ }
+};
+
 /*!
  * This structure contains pointers to the power management callback functions.
  */
 static struct platform_driver mxcfb_driver = {
 	.driver = {
-		   .name = MXCFB_NAME,
-		   },
+		.name = MXCFB_NAME,
+		.of_match_table	= imx_mxcfb_dt_ids,
+	},
 	.probe = mxcfb_probe,
 	.remove = mxcfb_remove,
 	.suspend = mxcfb_suspend,

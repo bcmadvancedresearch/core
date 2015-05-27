@@ -1,6 +1,6 @@
 /*
  *
- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+ * Copyright (C) 2011-2014 Freescale Semiconductor, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -30,21 +30,24 @@
 #include <linux/input.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
+#include <linux/of.h>
+#include <linux/regulator/consumer.h>
 
 #define MAG3110_DRV_NAME       "mag3110"
-#define MAG3110_ID		0xC4
-#define MAG3110_XYZ_DATA_LEN	6
-#define MAG3110_STATUS_ZYXDR	0x08
+#define MAG3110_ID		(0xC4)
+#define MAG3110_XYZ_DATA_LEN	(6)
+#define MAG3110_STATUS_ZYXDR	(0x08)
+#define MAG3110_IRQ_USED	(1)
+#define MAG3110_AC_MASK		(0x01)
+#define MAG3110_AC_OFFSET	(0)
+#define MAG3110_DR_MODE_MASK	(0x7 << 5)
+#define MAG3110_DR_MODE_OFFSET	(5)
 
-#define MAG3110_AC_MASK         (0x01)
-#define MAG3110_AC_OFFSET       0
-#define MAG3110_DR_MODE_MASK    (0x7 << 5)
-#define MAG3110_DR_MODE_OFFSET  5
-#define MAG3110_IRQ_USED   0
+#define POLL_INTERVAL_MAX	(500)
+#define POLL_INTERVAL		(100)
+#define INT_TIMEOUT		(1000)
+#define DEFAULT_POSITION	(2)
 
-#define POLL_INTERVAL_MAX	500
-#define POLL_INTERVAL		100
-#define INT_TIMEOUT   1000
 /* register enum for mag3110 registers */
 enum {
 	MAG3110_DR_STATUS = 0x00,
@@ -68,10 +71,12 @@ enum {
 	MAG3110_CTRL_REG1 = 0x10,
 	MAG3110_CTRL_REG2,
 };
+
 enum {
 	MAG_STANDBY,
 	MAG_ACTIVED
 };
+
 struct mag3110_data {
 	struct i2c_client *client;
 	struct input_polled_dev *poll_dev;
@@ -82,6 +87,7 @@ struct mag3110_data {
 	int active;
 	int position;
 };
+
 static short MAGHAL[8][3][3] = {
 	{ {0, 1, 0}, {-1, 0, 0}, {0, 0, 1} },
 	{ {1, 0, 0}, {0, 1, 0}, {0, 0, 1} },
@@ -95,10 +101,11 @@ static short MAGHAL[8][3][3] = {
 };
 
 static struct mag3110_data *mag3110_pdata;
-/*!
+static DEFINE_MUTEX(mag3110_lock);
+
+/*
  * This function do one mag3110 register read.
  */
-static DEFINE_MUTEX(mag3110_lock);
 static int mag3110_adjust_position(short *x, short *y, short *z)
 {
 	short rawdata[3], data[3];
@@ -125,7 +132,7 @@ static int mag3110_read_reg(struct i2c_client *client, u8 reg)
 	return i2c_smbus_read_byte_data(client, reg);
 }
 
-/*!
+/*
  * This function do one mag3110 register write.
  */
 static int mag3110_write_reg(struct i2c_client *client, u8 reg, char value)
@@ -138,7 +145,7 @@ static int mag3110_write_reg(struct i2c_client *client, u8 reg, char value)
 	return ret;
 }
 
-/*!
+/*
  * This function do multiple mag3110 registers read.
  */
 static int mag3110_read_block_data(struct i2c_client *client, u8 reg,
@@ -171,17 +178,17 @@ static int mag3110_init_client(struct i2c_client *client)
 	return ret;
 }
 
-/***************************************************************
-*
-* read sensor data from mag3110
-*
-***************************************************************/
+/*
+ * read sensor data from mag3110
+ */
 static int mag3110_read_data(short *x, short *y, short *z)
 {
 	struct mag3110_data *data;
-	int retry = 3;
 	u8 tmp_data[MAG3110_XYZ_DATA_LEN];
+#if !MAG3110_IRQ_USED
+	int retry = 3;
 	int result;
+#endif
 	if (!mag3110_pdata || mag3110_pdata->active == MAG_STANDBY)
 		return -EINVAL;
 
@@ -201,17 +208,18 @@ static int mag3110_read_data(short *x, short *y, short *z)
 		retry--;
 	} while (!(result & MAG3110_STATUS_ZYXDR) && retry > 0);
 	/* Clear data_ready flag after data is read out */
-	if (retry == 0) {
+	if (retry == 0)
 		return -EINVAL;
-	}
 #endif
 
 	data->data_ready = 0;
 
-	if (mag3110_read_block_data(data->client,
+	while (i2c_smbus_read_byte_data(data->client, MAG3110_DR_STATUS)) {
+		if (mag3110_read_block_data(data->client,
 				    MAG3110_OUT_X_MSB, MAG3110_XYZ_DATA_LEN,
 				    tmp_data) < 0)
-		return -1;
+			return -1;
+	}
 
 	*x = ((tmp_data[0] << 8) & 0xff00) | tmp_data[1];
 	*y = ((tmp_data[2] << 8) & 0xff00) | tmp_data[3];
@@ -246,12 +254,31 @@ static void mag3110_dev_poll(struct input_polled_dev *dev)
 #if MAG3110_IRQ_USED
 static irqreturn_t mag3110_irq_handler(int irq, void *dev_id)
 {
+	int result;
+	u8 tmp_data[MAG3110_XYZ_DATA_LEN];
+	result = i2c_smbus_read_byte_data(mag3110_pdata->client,
+						  MAG3110_DR_STATUS);
+	if (!(result & MAG3110_STATUS_ZYXDR))
+		return IRQ_NONE;
+
 	mag3110_pdata->data_ready = 1;
-	wake_up_interruptible(&mag3110_pdata->waitq);
+
+	if (mag3110_pdata->active == MAG_STANDBY)
+		/*
+		 * Since the mode will be changed, sometimes irq will
+		 * be handled in StandBy mode because of interrupt latency.
+		 * So just clear the interrutp flag via reading block data.
+		 */
+		mag3110_read_block_data(mag3110_pdata->client,
+					MAG3110_OUT_X_MSB,
+					MAG3110_XYZ_DATA_LEN, tmp_data);
+	else
+		wake_up_interruptible(&mag3110_pdata->waitq);
 
 	return IRQ_HANDLED;
 }
 #endif
+
 static ssize_t mag3110_enable_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
@@ -270,12 +297,19 @@ static ssize_t mag3110_enable_store(struct device *dev,
 				    const char *buf, size_t count)
 {
 	struct i2c_client *client;
-	int reg, ret, enable;
+	int reg, ret;
+	long enable;
 	u8 tmp_data[MAG3110_XYZ_DATA_LEN];
 
-	enable = simple_strtoul(buf, NULL, 10);
+	ret = strict_strtol(buf, 10, &enable);
+	if (ret) {
+		dev_err(dev, "string to long error\n");
+		return ret;
+	}
+
 	mutex_lock(&mag3110_lock);
 	client = mag3110_pdata->client;
+
 	reg = mag3110_read_reg(client, MAG3110_CTRL_REG1);
 	if (enable && mag3110_pdata->active == MAG_STANDBY) {
 		reg |= MAG3110_AC_MASK;
@@ -289,12 +323,10 @@ static ssize_t mag3110_enable_store(struct device *dev,
 			mag3110_pdata->active = MAG_STANDBY;
 	}
 
-	if (mag3110_pdata->active == MAG_ACTIVED) {
-		msleep(100);
-		/* Read out MSB data to clear interrupt flag automatically */
-		mag3110_read_block_data(client, MAG3110_OUT_X_MSB,
+	/* Read out MSB data to clear interrupt flag */
+	msleep(100);
+	mag3110_read_block_data(mag3110_pdata->client, MAG3110_OUT_X_MSB,
 					MAG3110_XYZ_DATA_LEN, tmp_data);
-	}
 	mutex_unlock(&mag3110_lock);
 	return count;
 }
@@ -356,10 +388,16 @@ static ssize_t mag3110_position_store(struct device *dev,
 				      struct device_attribute *attr,
 				      const char *buf, size_t count)
 {
-	int position;
-	position = simple_strtoul(buf, NULL, 10);
+	long position;
+	int ret;
+	ret = strict_strtol(buf, 10, &position);
+	if (ret) {
+		dev_err(dev, "string to long error\n");
+		return ret;
+	}
+
 	mutex_lock(&mag3110_lock);
-	mag3110_pdata->position = position;
+	mag3110_pdata->position = (int)position;
 	mutex_unlock(&mag3110_lock);
 	return count;
 }
@@ -378,13 +416,41 @@ static const struct attribute_group mag3110_attr_group = {
 	.attrs = mag3110_attributes,
 };
 
-static int __devinit mag3110_probe(struct i2c_client *client,
+static int mag3110_probe(struct i2c_client *client,
 				   const struct i2c_device_id *id)
 {
 	struct i2c_adapter *adapter;
 	struct input_dev *idev;
 	struct mag3110_data *data;
 	int ret = 0;
+	struct regulator *vdd, *vdd_io;
+	u32 pos = 0;
+	struct device_node *of_node = client->dev.of_node;
+#if MAG3110_IRQ_USED
+	struct irq_data *irq_data = irq_get_irq_data(client->irq);
+	u32 irq_flag;
+	bool shared_irq = of_property_read_bool(of_node, "shared-interrupt");
+#endif
+	vdd = NULL;
+	vdd_io = NULL;
+
+	vdd = devm_regulator_get(&client->dev, "vdd");
+	if (!IS_ERR(vdd)) {
+		ret  = regulator_enable(vdd);
+		if (ret) {
+			dev_err(&client->dev, "vdd set voltage error\n");
+			return ret;
+		}
+	}
+
+	vdd_io = devm_regulator_get(&client->dev, "vddio");
+	if (!IS_ERR(vdd_io)) {
+		ret = regulator_enable(vdd_io);
+		if (ret) {
+			dev_err(&client->dev, "vddio set voltage error\n");
+			return ret;
+		}
+	}
 
 	adapter = to_i2c_adapter(client->dev.parent);
 	if (!i2c_check_functionality(adapter,
@@ -447,10 +513,14 @@ static int __devinit mag3110_probe(struct i2c_client *client,
 		ret = -EINVAL;
 		goto error_rm_poll_dev;
 	}
-	/* set irq type to edge rising */
+
 #if MAG3110_IRQ_USED
-	ret = request_irq(client->irq, mag3110_irq_handler,
-			  IRQF_TRIGGER_RISING, client->dev.driver->name, idev);
+	irq_flag = irqd_get_trigger_type(irq_data);
+	irq_flag |= IRQF_ONESHOT;
+	if (shared_irq)
+		irq_flag |= IRQF_SHARED;
+	ret = request_threaded_irq(client->irq, NULL, mag3110_irq_handler,
+			  irq_flag, client->dev.driver->name, idev);
 	if (ret < 0) {
 		dev_err(&client->dev, "failed to register irq %d!\n",
 			client->irq);
@@ -461,7 +531,10 @@ static int __devinit mag3110_probe(struct i2c_client *client,
 	mag3110_init_client(client);
 	mag3110_pdata = data;
 	mag3110_pdata->active = MAG_STANDBY;
-	mag3110_pdata->position = *(int *)client->dev.platform_data;
+	ret = of_property_read_u32(of_node, "position", &pos);
+	if (ret)
+		pos = DEFAULT_POSITION;
+	mag3110_pdata->position = (int)pos;
 	dev_info(&client->dev, "mag3110 is probed\n");
 	return 0;
 error_rm_dev_sysfs:
@@ -479,7 +552,7 @@ error_rm_hwmon_dev:
 	return ret;
 }
 
-static int __devexit mag3110_remove(struct i2c_client *client)
+static int mag3110_remove(struct i2c_client *client)
 {
 	struct mag3110_data *data;
 	int ret;
@@ -524,7 +597,8 @@ static int mag3110_resume(struct i2c_client *client)
 					data->ctl_reg1);
 
 		if (data->ctl_reg1 & MAG3110_AC_MASK) {
-			/* Read out MSB data to clear interrupt flag automatically */
+			/* Read out MSB data to clear interrupt
+			 flag automatically */
 			mag3110_read_block_data(client, MAG3110_OUT_X_MSB,
 						MAG3110_XYZ_DATA_LEN, tmp_data);
 		}
@@ -549,7 +623,7 @@ static struct i2c_driver mag3110_driver = {
 	.suspend = mag3110_suspend,
 	.resume = mag3110_resume,
 	.probe = mag3110_probe,
-	.remove = __devexit_p(mag3110_remove),
+	.remove = mag3110_remove,
 	.id_table = mag3110_id,
 };
 

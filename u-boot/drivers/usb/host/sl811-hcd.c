@@ -16,23 +16,7 @@
  *	2.Original SL811 driver (hc_sl811.o) by Pei Liu <pbl@cypress.com>
  *	3.Rewrited as sl811.o by Yin Aihua <yinah:couragetech.com.cn>
  *
- * See file CREDITS for list of people who contributed to this
- * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 #include <common.h>
@@ -50,8 +34,6 @@
 
 #define	 SL811_ADR (0x50000000)
 #define	 SL811_DAT (0x50000001)
-
-#define mdelay(n) ({unsigned long msec=(n); while (msec--) udelay(1000);})
 
 #ifdef SL811_DEBUG
 static int debug = 9;
@@ -212,14 +194,14 @@ static int sl811_hc_reset(void)
 	return 1;
 }
 
-int usb_lowlevel_init(void)
+int usb_lowlevel_init(int index, enum usb_init_type init, void **controller)
 {
 	root_hub_devnum = 0;
 	sl811_hc_reset();
 	return 0;
 }
 
-int usb_lowlevel_stop(void)
+int usb_lowlevel_stop(int index)
 {
 	sl811_hc_reset();
 	return 0;
@@ -236,7 +218,7 @@ static int sl811_send_packet(struct usb_device *dev, unsigned long pipe, __u8 *b
 	__u16 status = 0;
 	int err = 0, time_start = get_timer(0);
 	int need_preamble = !(rh_status.wPortStatus & USB_PORT_STAT_LOW_SPEED) &&
-		usb_pipeslow(pipe);
+		(dev->speed == USB_SPEED_LOW);
 
 	if (len > 239)
 		return -1;
@@ -552,11 +534,12 @@ static int sl811_rh_submit_urb(struct usb_device *usb_dev, unsigned long pipe,
 	__u8 *bufp = data_buf;
 	int len = 0;
 	int status = 0;
-
 	__u16 bmRType_bReq;
-	__u16 wValue;
-	__u16 wIndex;
-	__u16 wLength;
+	__u16 wValue  = le16_to_cpu (cmd->value);
+	__u16 wLength = le16_to_cpu (cmd->length);
+#ifdef SL811_DEBUG
+	__u16 wIndex  = le16_to_cpu (cmd->index);
+#endif
 
 	if (usb_pipeint(pipe)) {
 		PDEBUG(0, "interrupt transfer unimplemented!\n");
@@ -564,9 +547,6 @@ static int sl811_rh_submit_urb(struct usb_device *usb_dev, unsigned long pipe,
 	}
 
 	bmRType_bReq  = cmd->requesttype | (cmd->request << 8);
-	wValue	      = le16_to_cpu (cmd->value);
-	wIndex	      = le16_to_cpu (cmd->index);
-	wLength	      = le16_to_cpu (cmd->length);
 
 	PDEBUG(5, "submit rh urb, req = %d(%x) val = %#x index = %#x len=%d\n",
 	       bmRType_bReq, bmRType_bReq, wValue, wIndex, wLength);

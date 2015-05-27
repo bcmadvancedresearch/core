@@ -182,7 +182,7 @@ static int smd_pkt_write(struct file *file, const char __user *buf,
 	if (count > MAX_BUF_SIZE)
 		return -EINVAL;
 
-	DBG("writting %d bytes\n", count);
+	DBG("writing %d bytes\n", count);
 
 	smd_pkt_devp = file->private_data;
 	if (!smd_pkt_devp || !smd_pkt_devp->ch)
@@ -379,9 +379,8 @@ static int __init smd_pkt_init(void)
 	for (i = 0; i < NUM_SMD_PKT_PORTS; ++i) {
 		smd_pkt_devp[i] = kzalloc(sizeof(struct smd_pkt_dev),
 					  GFP_KERNEL);
-		if (IS_ERR(smd_pkt_devp[i])) {
-			r = PTR_ERR(smd_pkt_devp[i]);
-			pr_err("kmalloc() failed %d\n", r);
+		if (!smd_pkt_devp[i]) {
+			pr_err("kmalloc() failed\n");
 			goto clean_cdevs;
 		}
 

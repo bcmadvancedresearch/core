@@ -162,7 +162,7 @@ static inline __attribute_const__ int __virt_to_node_shift(void)
 	pgdat->node_mem_map + (__pfn - pgdat->node_start_pfn);		\
 })
 #define page_to_pfn(_page) ({						\
-	struct page *__p = (_page);					\
+	const struct page *__p = (_page);				\
 	struct pglist_data *pgdat;					\
 	pgdat = &pg_data_map[page_to_nid(__p)];				\
 	((__p) - pgdat->node_mem_map) + pgdat->node_start_pfn;		\
@@ -172,8 +172,5 @@ static inline __attribute_const__ int __virt_to_node_shift(void)
 #define pfn_valid(pfn)		virt_addr_valid(pfn_to_virt(pfn))
 
 #endif /* __ASSEMBLY__ */
-
-#define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
-				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
 #endif /* _M68K_PAGE_MM_H */

@@ -26,8 +26,7 @@
 #include <linux/cache.h>
 #include <linux/bug.h>
 #include <linux/sort.h>
-
-#include "setup.h"
+#include <asm/setup.h>
 
 #if 0
 #define DEBUGP printk
@@ -172,17 +171,6 @@ int module_frob_arch_sections(Elf32_Ehdr *hdr,
 	sechdrs[me->arch.init_plt_section].sh_size
 		= get_plt_size(hdr, sechdrs, secstrings, 1);
 	return 0;
-}
-
-int apply_relocate(Elf32_Shdr *sechdrs,
-		   const char *strtab,
-		   unsigned int symindex,
-		   unsigned int relsec,
-		   struct module *module)
-{
-	printk(KERN_ERR "%s: Non-ADD RELOCATION unsupported\n",
-	       module->name);
-	return -ENOEXEC;
 }
 
 static inline int entry_matches(struct ppc_plt_entry *entry, Elf32_Addr val)

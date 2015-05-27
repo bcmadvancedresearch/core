@@ -2,36 +2,13 @@
  * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
  * Terry Lv <r65388@freescale.com>
  *
- * See file CREDITS for list of people who contributed to this
- * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
- *
- * with the reference on libata and ahci drvier in kernel
- *
+ * SPDX-License-Identifier:	GPL-2.0+
  */
-#include "dwc_ahsata.h"
-
-#ifdef CONFIG_ARCH_MMU
-#include <asm/arch/mmu.h>
-#endif
 
 #include <libata.h>
 #include <ahci.h>
 #include <fis.h>
+#include <sata.h>
 
 #include <common.h>
 #include <malloc.h>
@@ -39,6 +16,8 @@
 #include <asm/errno.h>
 #include <asm/io.h>
 #include <linux/bitops.h>
+#include <asm/arch/clock.h>
+#include "dwc_ahsata.h"
 
 struct sata_port_regs {
 	u32 clb;
@@ -98,57 +77,11 @@ struct sata_host_regs {
 
 #define writel_with_flush(a, b)	do { writel(a, b); readl(b); } while (0)
 
-#ifdef CONFIG_ARCH_MMU
-static u8 *dma_buf;
-#endif
 static int is_ready;
-extern block_dev_desc_t sata_dev_desc[CONFIG_SYS_SATA_MAX_DEVICE];
-
-static inline void mdelay(u32 msec)
-{
-	u32 i;
-	for (i = 0; i < msec; ++i)
-		udelay(1000);
-}
-
-static inline void sdelay(u32 sec)
-{
-	u32 i;
-	for (i = 0; i < sec; ++i)
-		mdelay(1000);
-}
-
-#ifdef DWC_AHSATA_DEBUG
-void dprint_buffer(u8 *buf, s32 len)
-{
-	s32 i, j;
-
-	i = 0;
-	j = 0;
-	printf("\n\r");
-
-	for (i = 0; i < len; ++i) {
-		printf("%02x ", *buf++);
-		j++;
-		if (j == 16) {
-			printf("\n\r");
-			j = 0;
-		}
-	}
-	printf("\n\r");
-}
-#endif
 
 static inline u32 ahci_port_base(u32 base, u32 port)
 {
 	return base + 0x100 + (port * 0x80);
-}
-
-
-static void ahci_setup_port(struct ahci_ioports *port, u32 base,
-				u32 port_idx)
-{
-	base = ahci_port_base(base, port_idx);
 }
 
 static int waiting_for_cmd_completed(u8 *offset,
@@ -215,12 +148,15 @@ static int ahci_host_init(struct ahci_probe_ent *probe_ent)
 	writel_with_flush((1 << num_ports) - 1,
 				&(host_mmio->pi));
 
-	/* Determine which Ports are implemented by the DWC_ahsata,
+	/*
+	 * Determine which Ports are implemented by the DWC_ahsata,
 	 * by reading the PI register. This bit map value aids the
 	 * software to determine how many Ports are available and
-	 * which Port registers need to be initialized. */
+	 * which Port registers need to be initialized.
+	 */
 	probe_ent->cap = readl(&(host_mmio->cap));
 	probe_ent->port_map = readl(&(host_mmio->pi));
+
 	/* Determine how many command slots the HBA supports */
 	probe_ent->n_ports =
 		(probe_ent->cap & SATA_HOST_CAP_NP_MASK) + 1;
@@ -233,23 +169,27 @@ static int ahci_host_init(struct ahci_probe_ent *probe_ent)
 			ahci_port_base((u32)host_mmio, i);
 		port_mmio =
 			(struct sata_port_regs *)probe_ent->port[i].port_mmio;
-		ahci_setup_port(&probe_ent->port[i], (u32)host_mmio, i);
 
-		/* make sure port is not active */
 		/* Ensure that the DWC_ahsata is in idle state */
 		tmp = readl(&(port_mmio->cmd));
-		/* When P#CMD.ST, P#CMD.CR, P#CMD.FRE and P#CMD.FR
-		 * are all cleared, the Port is in an idle state. */
+
+		/*
+		 * When P#CMD.ST, P#CMD.CR, P#CMD.FRE and P#CMD.FR
+		 * are all cleared, the Port is in an idle state.
+		 */
 		if (tmp & (SATA_PORT_CMD_CR | SATA_PORT_CMD_FR |
 			SATA_PORT_CMD_FRE | SATA_PORT_CMD_ST)) {
-			/* System software places a Port into the idle state by
-			 * clearing P#CMD.ST and waiting for P#CMD.CR to return
-			 * 0 when read. */
 
+			/*
+			 * System software places a Port into the idle state by
+			 * clearing P#CMD.ST and waiting for P#CMD.CR to return
+			 * 0 when read.
+			 */
 			tmp &= ~SATA_PORT_CMD_ST;
 			writel_with_flush(tmp, &(port_mmio->cmd));
 
-			/* spec says 500 msecs for each bit, so
+			/*
+			 * spec says 500 msecs for each bit, so
 			 * this is slightly incorrect.
 			 */
 			mdelay(500);
@@ -297,9 +237,11 @@ static int ahci_host_init(struct ahci_probe_ent *probe_ent)
 			return -1;
 		}
 
-		/* For each implemented Port, clear the P#SERR
+		/*
+		 * For each implemented Port, clear the P#SERR
 		 * register, by writing ones to each implemented\
-		 * bit location. */
+		 * bit location.
+		 */
 		tmp = readl(&(port_mmio->serr));
 		debug("P#SERR 0x%x\n",
 				tmp);
@@ -316,7 +258,7 @@ static int ahci_host_init(struct ahci_probe_ent *probe_ent)
 		/* set irq mask (enables interrupts) */
 		writel(DEF_PORT_IRQ, &(port_mmio->ie));
 
-		/*register linkup ports */
+		/* register linkup ports */
 		tmp = readl(&(port_mmio->ssts));
 		debug("Port %d status: 0x%x\n", i, tmp);
 		if ((tmp & SATA_PORT_SSTS_DET_MASK) == 0x03)
@@ -409,14 +351,6 @@ static int ahci_init_one(int pdev)
 
 	ahci_print_info(probe_ent);
 
-#ifdef CONFIG_ARCH_MMU
-	dma_buf = (u8 *)memalign(4, ATA_MAX_SECTORS * ATA_SECT_SIZE);
-	if (NULL == dma_buf) {
-		printf("Fail to alloc buf for dma access!\n");
-		return 0;
-	}
-#endif
-
 	/* Save the private struct to block device struct */
 	sata_dev_desc[pdev].priv = (void *)probe_ent;
 
@@ -430,13 +364,7 @@ static int ahci_fill_sg(struct ahci_probe_ent *probe_ent,
 			u8 port, unsigned char *buf, int buf_len)
 {
 	struct ahci_ioports *pp = &(probe_ent->port[port]);
-#ifdef CONFIG_ARCH_MMU
-	struct ahci_sg *ahci_sg =
-	    (struct ahci_sg *)ioremap_nocache(iomem_to_phys(pp->cmd_tbl_sg),
-		    0);
-#else
 	struct ahci_sg *ahci_sg = pp->cmd_tbl_sg;
-#endif
 	u32 sg_count, max_bytes;
 	int i;
 
@@ -448,13 +376,8 @@ static int ahci_fill_sg(struct ahci_probe_ent *probe_ent,
 	}
 
 	for (i = 0; i < sg_count; i++) {
-#ifdef CONFIG_ARCH_MMU
-		ahci_sg->addr =
-		iomem_to_phys(cpu_to_le32((u32)buf + i * max_bytes));
-#else
 		ahci_sg->addr =
 			cpu_to_le32((u32)buf + i * max_bytes);
-#endif
 		ahci_sg->addr_hi = 0;
 		ahci_sg->flags_size = cpu_to_le32(0x3fffff &
 					(buf_len < max_bytes
@@ -469,24 +392,13 @@ static int ahci_fill_sg(struct ahci_probe_ent *probe_ent,
 
 static void ahci_fill_cmd_slot(struct ahci_ioports *pp, u32 cmd_slot, u32 opts)
 {
-#ifdef CONFIG_ARCH_MMU
-	struct ahci_cmd_hdr *cmd_hdr =
-	    (struct ahci_cmd_hdr *)ioremap_nocache(iomem_to_phys(pp->cmd_slot
-				+ AHCI_CMD_SLOT_SZ * cmd_slot), 0);
-#else
 	struct ahci_cmd_hdr *cmd_hdr = (struct ahci_cmd_hdr *)(pp->cmd_slot +
 					AHCI_CMD_SLOT_SZ * cmd_slot);
-#endif
 
 	memset(cmd_hdr, 0, AHCI_CMD_SLOT_SZ);
 	cmd_hdr->opts = cpu_to_le32(opts);
 	cmd_hdr->status = 0;
-#ifdef CONFIG_ARCH_MMU
-	cmd_hdr->tbl_addr =
-		iomem_to_phys(cpu_to_le32(pp->cmd_tbl & 0xffffffff));
-#else
 	cmd_hdr->tbl_addr = cpu_to_le32(pp->cmd_tbl & 0xffffffff);
-#endif
 	cmd_hdr->tbl_addr_hi = 0;
 }
 
@@ -507,6 +419,7 @@ static int ahci_exec_ata_cmd(struct ahci_probe_ent *probe_ent,
 		printf("Can't find empty command slot!\n");
 		return 0;
 	}
+
 	/* Check xfer length */
 	if (buf_len > MAX_BYTES_PER_TRANS) {
 		printf("Max transfer length is %dB\n\r",
@@ -518,10 +431,13 @@ static int ahci_exec_ata_cmd(struct ahci_probe_ent *probe_ent,
 	if (buf && buf_len)
 		sg_count = ahci_fill_sg(probe_ent, port, buf, buf_len);
 	opts = (sizeof(struct sata_fis_h2d) >> 2) | (sg_count << 16);
-	if (is_write)
+	if (is_write) {
 		opts |= 0x40;
+		flush_cache((ulong)buf, buf_len);
+	}
 	ahci_fill_cmd_slot(pp, cmd_slot, opts);
 
+	flush_cache((int)(pp->cmd_slot), AHCI_PORT_PRIV_DMA_SZ);
 	writel_with_flush(1 << cmd_slot, &(port_mmio->ci));
 
 	if (waiting_for_cmd_completed((u8 *)&(port_mmio->ci),
@@ -529,8 +445,12 @@ static int ahci_exec_ata_cmd(struct ahci_probe_ent *probe_ent,
 		printf("timeout exit!\n");
 		return -1;
 	}
+	invalidate_dcache_range((int)(pp->cmd_slot),
+				(int)(pp->cmd_slot)+AHCI_PORT_PRIV_DMA_SZ);
 	debug("ahci_exec_ata_cmd: %d byte transferred.\n",
 	      pp->cmd_slot->status);
+	if (!is_write)
+		invalidate_dcache_range((ulong)buf, (ulong)buf+buf_len);
 
 	return buf_len;
 }
@@ -539,9 +459,9 @@ static void ahci_set_feature(u8 dev, u8 port)
 {
 	struct ahci_probe_ent *probe_ent =
 		(struct ahci_probe_ent *)sata_dev_desc[dev].priv;
-	struct sata_fis_h2d h2d, *cfis = &h2d;
+	struct sata_fis_h2d h2d __aligned(ARCH_DMA_MINALIGN);
+	struct sata_fis_h2d *cfis = &h2d;
 
-	/*set feature */
 	memset(cfis, 0, sizeof(struct sata_fis_h2d));
 	cfis->fis_type = SATA_FIS_TYPE_REGISTER_H2D;
 	cfis->pm_port_c = 1 << 7;
@@ -584,53 +504,29 @@ static int ahci_port_start(struct ahci_probe_ent *probe_ent,
 	 * First item in chunk of DMA memory: 32-slot command table,
 	 * 32 bytes each in size
 	 */
-#ifdef CONFIG_ARCH_MMU
-	pp->cmd_slot =
-	(struct ahci_cmd_hdr *)ioremap_nocache(iomem_to_phys((ulong)mem),
-		AHCI_CMD_SLOT_SZ);
-#else
 	pp->cmd_slot = (struct ahci_cmd_hdr *)mem;
-#endif
-	debug("cmd_slot = 0x%x\n", pp->cmd_slot);
+	debug("cmd_slot = 0x%x\n", (unsigned int) pp->cmd_slot);
 	mem += (AHCI_CMD_SLOT_SZ * DWC_AHSATA_MAX_CMD_SLOTS);
 
 	/*
 	 * Second item: Received-FIS area, 256-Byte aligned
 	 */
-#ifdef CONFIG_ARCH_MMU
-	pp->rx_fis = (u32)ioremap_nocache(iomem_to_phys((ulong)mem),
-		AHCI_RX_FIS_SZ);
-#else
 	pp->rx_fis = mem;
-#endif
 	mem += AHCI_RX_FIS_SZ;
 
 	/*
 	 * Third item: data area for storing a single command
 	 * and its scatter-gather table
 	 */
-#ifdef CONFIG_ARCH_MMU
-	pp->cmd_tbl = (u32)ioremap_nocache(iomem_to_phys((ulong)mem),
-		AHCI_CMD_TBL_HDR);
-#else
 	pp->cmd_tbl = mem;
-#endif
 	debug("cmd_tbl_dma = 0x%x\n", pp->cmd_tbl);
 
 	mem += AHCI_CMD_TBL_HDR;
 
 	writel_with_flush(0x00004444, &(port_mmio->dmacr));
-#ifdef CONFIG_ARCH_MMU
-	pp->cmd_tbl_sg =
-		(struct ahci_sg *)ioremap_nocache(iomem_to_phys((ulong)mem),
-		AHCI_CMD_TBL_HDR);
-	writel_with_flush(iomem_to_phys(pp->cmd_slot), &(port_mmio->clb));
-	writel_with_flush(iomem_to_phys(pp->rx_fis), &(port_mmio->fb));
-#else
 	pp->cmd_tbl_sg = (struct ahci_sg *)mem;
 	writel_with_flush((u32)pp->cmd_slot, &(port_mmio->clb));
 	writel_with_flush(pp->rx_fis, &(port_mmio->fb));
-#endif
 
 	/* Enable FRE */
 	writel_with_flush((SATA_PORT_CMD_FRE | readl(&(port_mmio->cmd))),
@@ -683,7 +579,6 @@ int init_sata(int dev)
 				printf("Can not start port %d\n", i);
 				return 1;
 			}
-			/* ahci_set_feature(dev, (u8)i); */
 			probe_ent->hard_port_no = i;
 			break;
 		}
@@ -712,7 +607,8 @@ static void dwc_ahsata_identify(int dev, u16 *id)
 {
 	struct ahci_probe_ent *probe_ent =
 		(struct ahci_probe_ent *)sata_dev_desc[dev].priv;
-	struct sata_fis_h2d h2d, *cfis = &h2d;
+	struct sata_fis_h2d h2d __aligned(ARCH_DMA_MINALIGN);
+	struct sata_fis_h2d *cfis = &h2d;
 	u8 port = probe_ent->hard_port_no;
 
 	memset(cfis, 0, sizeof(struct sata_fis_h2d));
@@ -742,15 +638,10 @@ static u32 dwc_ahsata_rw_cmd(int dev, u32 start, u32 blkcnt,
 {
 	struct ahci_probe_ent *probe_ent =
 		(struct ahci_probe_ent *)sata_dev_desc[dev].priv;
-	struct sata_fis_h2d h2d, *cfis = &h2d;
+	struct sata_fis_h2d h2d __aligned(ARCH_DMA_MINALIGN);
+	struct sata_fis_h2d *cfis = &h2d;
 	u8 port = probe_ent->hard_port_no;
 	u32 block;
-#ifdef CONFIG_ARCH_MMU
-	u8 *dma_buf_virt = NULL;
-
-	dma_buf_virt = (u8 *)ioremap_nocache((ulong)dma_buf, 0);
-	memset(dma_buf_virt, 0, blkcnt * ATA_SECT_SIZE);
-#endif
 
 	block = start;
 
@@ -767,31 +658,19 @@ static u32 dwc_ahsata_rw_cmd(int dev, u32 start, u32 blkcnt,
 	cfis->lba_low = block & 0xff;
 	cfis->sector_count = (u8)(blkcnt & 0xff);
 
-#ifdef CONFIG_ARCH_MMU
-	if (is_write)
-		memcpy(dma_buf_virt, buffer, ATA_SECT_SIZE * blkcnt);
-	if (ahci_exec_ata_cmd(probe_ent, port, cfis, dma_buf_virt,
-			ATA_SECT_SIZE * blkcnt, is_write) > 0)  {
-		if (!is_write)
-			memcpy(buffer, dma_buf_virt, ATA_SECT_SIZE * blkcnt);
-	} else
-		blkcnt = 0;
-
-	return blkcnt;
-#else
 	if (ahci_exec_ata_cmd(probe_ent, port, cfis,
 			buffer, ATA_SECT_SIZE * blkcnt, is_write) > 0)
 		return blkcnt;
 	else
 		return 0;
-#endif
 }
 
 void dwc_ahsata_flush_cache(int dev)
 {
 	struct ahci_probe_ent *probe_ent =
 		(struct ahci_probe_ent *)sata_dev_desc[dev].priv;
-	struct sata_fis_h2d h2d, *cfis = &h2d;
+	struct sata_fis_h2d h2d __aligned(ARCH_DMA_MINALIGN);
+	struct sata_fis_h2d *cfis = &h2d;
 	u8 port = probe_ent->hard_port_no;
 
 	memset(cfis, 0, sizeof(struct sata_fis_h2d));
@@ -808,15 +687,10 @@ static u32 dwc_ahsata_rw_cmd_ext(int dev, u32 start, lbaint_t blkcnt,
 {
 	struct ahci_probe_ent *probe_ent =
 		(struct ahci_probe_ent *)sata_dev_desc[dev].priv;
-	struct sata_fis_h2d h2d, *cfis = &h2d;
+	struct sata_fis_h2d h2d __aligned(ARCH_DMA_MINALIGN);
+	struct sata_fis_h2d *cfis = &h2d;
 	u8 port = probe_ent->hard_port_no;
 	u64 block;
-#ifdef CONFIG_ARCH_MMU
-	u8 *dma_buf_virt = NULL;
-
-	dma_buf_virt = (u8 *)ioremap_nocache((ulong)dma_buf, 0);
-	memset(dma_buf_virt, 0, blkcnt * ATA_SECT_SIZE);
-#endif
 
 	block = (u64)start;
 
@@ -838,24 +712,11 @@ static u32 dwc_ahsata_rw_cmd_ext(int dev, u32 start, lbaint_t blkcnt,
 	cfis->sector_count_exp = (blkcnt >> 8) & 0xff;
 	cfis->sector_count = blkcnt & 0xff;
 
-#ifdef CONFIG_ARCH_MMU
-	if (is_write)
-		memcpy(dma_buf_virt, buffer, ATA_SECT_SIZE * blkcnt);
-	if (ahci_exec_ata_cmd(probe_ent, port, cfis, dma_buf_virt,
-			ATA_SECT_SIZE * blkcnt, is_write) > 0)  {
-		if (!is_write)
-			memcpy(buffer, dma_buf_virt, ATA_SECT_SIZE * blkcnt);
-	} else
-		blkcnt = 0;
-
-	return blkcnt;
-#else
 	if (ahci_exec_ata_cmd(probe_ent, port, cfis, buffer,
 			ATA_SECT_SIZE * blkcnt, is_write) > 0)
 		return blkcnt;
 	else
 		return 0;
-#endif
 }
 
 u32 dwc_ahsata_rw_ncq_cmd(int dev, u32 start, lbaint_t blkcnt,
@@ -863,10 +724,9 @@ u32 dwc_ahsata_rw_ncq_cmd(int dev, u32 start, lbaint_t blkcnt,
 {
 	struct ahci_probe_ent *probe_ent =
 		(struct ahci_probe_ent *)sata_dev_desc[dev].priv;
-	struct sata_fis_h2d h2d, *cfis = &h2d;
+	struct sata_fis_h2d h2d __aligned(ARCH_DMA_MINALIGN);
+	struct sata_fis_h2d *cfis = &h2d;
 	u8 port = probe_ent->hard_port_no;
-	u8 queue_depth;
-	int ncq_channel;
 	u64 block;
 
 	if (sata_dev_desc[dev].lba48 != 1) {
@@ -895,12 +755,6 @@ u32 dwc_ahsata_rw_ncq_cmd(int dev, u32 start, lbaint_t blkcnt,
 	cfis->features_exp = (blkcnt >> 8) & 0xff;
 	cfis->features = blkcnt & 0xff;
 
-	queue_depth = probe_ent->flags & SATA_FLAG_Q_DEP_MASK;
-	if (queue_depth >= DWC_AHSATA_HC_MAX_CMD)
-		ncq_channel = DWC_AHSATA_HC_MAX_CMD - 1;
-	else
-		ncq_channel = queue_depth - 1;
-
 	/* Use the latest queue */
 	ahci_exec_ata_cmd(probe_ent, port, cfis,
 			buffer, ATA_SECT_SIZE * blkcnt, is_write);
@@ -912,7 +766,8 @@ void dwc_ahsata_flush_cache_ext(int dev)
 {
 	struct ahci_probe_ent *probe_ent =
 		(struct ahci_probe_ent *)sata_dev_desc[dev].priv;
-	struct sata_fis_h2d h2d, *cfis = &h2d;
+	struct sata_fis_h2d h2d __aligned(ARCH_DMA_MINALIGN);
+	struct sata_fis_h2d *cfis = &h2d;
 	u8 port = probe_ent->hard_port_no;
 
 	memset(cfis, 0, sizeof(struct sata_fis_h2d));
@@ -938,7 +793,7 @@ static void dwc_ahsata_init_wcache(int dev, u16 *id)
 }
 
 u32 ata_low_level_rw_lba48(int dev, u32 blknr, lbaint_t blkcnt,
-				void *buffer, int is_write)
+				const void *buffer, int is_write)
 {
 	u32 start, blks;
 	u8 *addr;
@@ -948,11 +803,7 @@ u32 ata_low_level_rw_lba48(int dev, u32 blknr, lbaint_t blkcnt,
 	blks = blkcnt;
 	addr = (u8 *)buffer;
 
-#ifdef CONFIG_ARCH_MMU
-	max_blks = ATA_MAX_SECTORS;
-#else
 	max_blks = ATA_MAX_SECTORS_LBA48;
-#endif
 
 	do {
 		if (blks > max_blks) {
@@ -976,7 +827,7 @@ u32 ata_low_level_rw_lba48(int dev, u32 blknr, lbaint_t blkcnt,
 }
 
 u32 ata_low_level_rw_lba28(int dev, u32 blknr, lbaint_t blkcnt,
-				void *buffer, int is_write)
+				const void *buffer, int is_write)
 {
 	u32 start, blks;
 	u8 *addr;
@@ -1011,7 +862,7 @@ u32 ata_low_level_rw_lba28(int dev, u32 blknr, lbaint_t blkcnt,
 /*
  * SATA interface between low level driver and command layer
  */
-ulong sata_read(int dev, unsigned long blknr, lbaint_t blkcnt, void *buffer)
+ulong sata_read(int dev, ulong blknr, lbaint_t blkcnt, void *buffer)
 {
 	u32 rc;
 
@@ -1024,7 +875,7 @@ ulong sata_read(int dev, unsigned long blknr, lbaint_t blkcnt, void *buffer)
 	return rc;
 }
 
-ulong sata_write(int dev, unsigned long blknr, lbaint_t blkcnt, void *buffer)
+ulong sata_write(int dev, ulong blknr, lbaint_t blkcnt, const void *buffer)
 {
 	u32 rc;
 	struct ahci_probe_ent *probe_ent =
@@ -1059,7 +910,9 @@ int scan_sata(int dev)
 	u8 port = probe_ent->hard_port_no;
 	block_dev_desc_t *pdev = &(sata_dev_desc[dev]);
 
-	id = (u16 *)malloc(ATA_ID_WORDS * 2);
+	id = (u16 *)memalign(ARCH_DMA_MINALIGN,
+				roundup(ARCH_DMA_MINALIGN,
+					(ATA_ID_WORDS * 2)));
 	if (!id) {
 		printf("id malloc failed\n\r");
 		return -1;
@@ -1115,4 +968,3 @@ int scan_sata(int dev)
 
 	return 0;
 }
-

@@ -1,14 +1,7 @@
 /*
- * Copyright 2004-2010 Freescale Semiconductor, Inc. All Rights Reserved.
- */
-
-/*
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
+ * Copyright (C) 2009-2014 Freescale Semiconductor, Inc. All Rights Reserved.
  *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 /*!
@@ -31,7 +24,7 @@
 #include <common.h>
 #include <asm/errno.h>
 #include <linux/types.h>
-#include <asm/mxc_key_defs.h>
+#include <asm/imx-common/mxc_key_defs.h>
 #include <malloc.h>
 
 /*
@@ -83,7 +76,7 @@ static unsigned short *prev_rcmap;
 /*!
  * Debounce polling period(10ms) in system ticks.
  */
-static unsigned short KScanRate = (10 * CONFIG_SYS_HZ) / 1000;
+/*static unsigned short KScanRate = (10 * CONFIG_SYS_HZ) / 1000;*/
 
 /*!
  * These arrays are used to store press and release scancodes.
@@ -93,12 +86,6 @@ static short **release_scancode;
 
 static const unsigned short *mxckpd_keycodes;
 static unsigned short mxckpd_keycodes_size;
-
-/*!
- * These functions are used to configure and the GPIO pins for keypad to
- * activate and deactivate it.
- */
-extern void setup_mxc_kpd(void);
 
 /*!
  * This function is called to scan the keypad matrix to find out the key press
@@ -138,6 +125,12 @@ static int mxc_kpp_scan_matrix(void)
 	/* save cur keypad matrix to prev */
 	memcpy(prev_rcmap, cur_rcmap, kpp_dev.kpp_rows * sizeof(prev_rcmap[0]));
 	memset(cur_rcmap, 0, kpp_dev.kpp_rows * sizeof(cur_rcmap[0]));
+
+	/*1. Disable both (depress and release) keypad interrupts.*/
+
+	/* KDIE has been disabled in mxc_kpp_getc before calling scan matrix.
+	  * KRIE is always disabled in this driver.
+	  */
 
 	for (col = 0; col < kpp_dev.kpp_cols; col++) {	/* Col */
 		/* 2. Write 1.s to KPDR[15:8] setting column data to 1.s */
@@ -597,4 +590,3 @@ err:
 	mxc_kpp_free_allocated();
 	return retval;
 }
-

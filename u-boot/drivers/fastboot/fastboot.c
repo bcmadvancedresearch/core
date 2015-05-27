@@ -1,28 +1,7 @@
 /*
- * Copyright (C) 2010-2013 Freescale Semiconductor, Inc.
+ * Copyright (C) 2010-2014 Freescale Semiconductor, Inc. All Rights Reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
- * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 #include <common.h>
@@ -34,6 +13,9 @@
 #include <usbdevice.h>
 #include <mmc.h>
 #include <sata.h>
+#ifdef CONFIG_ANDROID_RECOVERY
+#include <recovery.h>
+#endif
 
 /*
  * Defines
@@ -70,6 +52,11 @@
 #define STR_DATA_INTERFACE_INDEX    0x05
 #define STR_CTRL_INTERFACE_INDEX    0x06
 #define STR_COUNT		    0x07
+
+#define FASTBOOT_FBPARTS_ENV_MAX_LEN 1024
+/* To support the Android-style naming of flash */
+#define MAX_PTN		    16
+
 
 /*pentry index internally*/
 enum {
@@ -140,8 +127,7 @@ struct fastboot_config_desc {
 	struct usb_configuration_descriptor configuration_desc;
 	struct usb_interface_descriptor	interface_desc[1];
 	struct usb_endpoint_descriptor data_endpoints[NUM_ENDPOINTS];
-
-} __attribute__((packed));
+};
 
 static struct fastboot_config_desc
 fastboot_configuration_descriptors[1] = {
@@ -202,18 +188,30 @@ fastboot_configuration_descriptors[1] = {
 	},
 };
 
+
+
+static struct fastboot_ptentry ptable[MAX_PTN];
+static unsigned int pcount;
+
+
 /* Static Function Prototypes */
-static void fastboot_init_strings(void);
-static void fastboot_init_instances(void);
-static void fastboot_init_endpoints(void);
-static void fastboot_event_handler(struct usb_device_instance *device,
+static void _fastboot_init_strings(void);
+static void _fastboot_init_instances(void);
+static void _fastboot_init_endpoints(void);
+static void _fastboot_event_handler(struct usb_device_instance *device,
 				usb_device_event_t event, int data);
-static int fastboot_cdc_setup(struct usb_device_request *request,
+static int _fastboot_cdc_setup(struct usb_device_request *request,
 				struct urb *urb);
-static int fastboot_usb_configured(void);
-#ifdef CONFIG_FASTBOOT_STORAGE_EMMC_SATA
-static int fastboot_init_mmc_sata_ptable(void);
+static int _fastboot_usb_configured(void);
+#if defined(CONFIG_FASTBOOT_STORAGE_SATA) \
+	|| defined(CONFIG_FASTBOOT_STORAGE_MMC)
+static int _fastboot_parts_load_from_ptable(void);
 #endif
+#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
+static int _fastboot_parts_load_from_env(void);
+#endif
+static int _fastboot_setup_dev(void);
+static void _fastboot_load_partitions(void);
 
 /* utility function for converting char* to wide string used by USB */
 static void str2wide(char *str, u16 * wide)
@@ -235,7 +233,7 @@ static void str2wide(char *str, u16 * wide)
    support "mmc0" to "mmc9" currently. It will be treated as device 0 for
    other string.
 */
-static int get_mmc_no(char *env_str)
+static int _fastboot_get_mmc_no(char *env_str)
 {
 	int digit = 0;
 	unsigned char a;
@@ -250,12 +248,37 @@ static int get_mmc_no(char *env_str)
 	return digit;
 }
 
+static int _fastboot_setup_dev(void)
+{
+	char *fastboot_env;
+	fastboot_env = getenv("fastboot_dev");
+
+	if (fastboot_env) {
+		if (!strcmp(fastboot_env, "sata")) {
+			fastboot_devinfo.type = DEV_SATA;
+			fastboot_devinfo.dev_id = 0;
+		} else if (!strcmp(fastboot_env, "nand")) {
+			fastboot_devinfo.type = DEV_NAND;
+			fastboot_devinfo.dev_id = 0;
+		} else if (!strncmp(fastboot_env, "mmc", 3)) {
+			fastboot_devinfo.type = DEV_MMC;
+			fastboot_devinfo.dev_id = _fastboot_get_mmc_no(fastboot_env);
+		}
+	} else {
+		return 1;
+	}
+
+	return 0;
+}
+
+
 /*
  * Initialize fastboot
  */
 int fastboot_init(struct cmd_fastboot_interface *interface)
 {
 	printf("fastboot is in init......");
+
 	fastboot_interface = interface;
 	fastboot_interface->product_name = CONFIG_FASTBOOT_PRODUCT_NAME_STR;
 	fastboot_interface->serial_no = CONFIG_FASTBOOT_SERIAL_NUM;
@@ -264,144 +287,20 @@ int fastboot_init(struct cmd_fastboot_interface *interface)
 				(unsigned char *)CONFIG_FASTBOOT_TRANSFER_BUF;
 	fastboot_interface->transfer_buffer_size =
 				CONFIG_FASTBOOT_TRANSFER_BUF_SIZE;
-	fastboot_init_strings();
+
+	_fastboot_init_strings();
 	/* Basic USB initialization */
 	udc_init();
 
-	fastboot_init_instances();
-#ifdef CONFIG_FASTBOOT_STORAGE_EMMC_SATA
-	fastboot_init_mmc_sata_ptable();
-#endif
+	_fastboot_init_instances();
+
 	udc_startup_events(device_instance);
 	udc_connect();		/* Enable pullup for host detection */
 
 	return 0;
 }
 
-#ifdef CONFIG_FASTBOOT_STORAGE_EMMC_SATA
-/**
-   @mmc_dos_partition_index: the partition index in mbr.
-   @mmc_partition_index: the boot partition or user partition index,
-   not related to the partition table.
- */
-static int setup_ptable_mmc_partition(int ptable_index,
-				      int mmc_dos_partition_index,
-				      int mmc_partition_index,
-				      const char *name,
-				      block_dev_desc_t *dev_desc,
-				      fastboot_ptentry *ptable)
-{
-	disk_partition_t info;
-	strcpy(ptable[ptable_index].name, name);
-
-	if (get_partition_info(dev_desc,
-			       mmc_dos_partition_index, &info)) {
-		printf("Bad partition index:%d for partition:%s\n",
-		       mmc_dos_partition_index, name);
-		return -1;
-	} else {
-		ptable[ptable_index].start = info.start;
-		ptable[ptable_index].length = info.size;
-		ptable[ptable_index].partition_id = mmc_partition_index;
-	}
-	return 0;
-}
-
-static int fastboot_init_mmc_sata_ptable(void)
-{
-	int i;
-#ifdef CONFIG_CMD_SATA
-	int sata_device_no;
-#endif
-	int boot_partition = -1, user_partition = -1;
-	/* mmc boot partition: -1 means no partition, 0 user part., 1 boot part.
-	 * default is no partition, for emmc default user part, except emmc*/
-	struct mmc *mmc;
-	block_dev_desc_t *dev_desc;
-	char *fastboot_env;
-	fastboot_ptentry ptable[PTN_RECOVERY_INDEX + 1];
-
-	fastboot_env = getenv("fastboot_dev");
-	/* sata case in env */
-	if (fastboot_env && !strcmp(fastboot_env, "sata")) {
-		fastboot_devinfo.type = DEV_SATA;
-#ifdef CONFIG_CMD_SATA
-		puts("flash target is SATA\n");
-		if (sata_initialize())
-			return -1;
-		sata_device_no = CONFIG_FASTBOOT_SATA_NO;
-		if (sata_device_no >= CONFIG_SYS_SATA_MAX_DEVICE) {
-			printf("Unknown SATA(%d) device for fastboot\n",
-				sata_device_no);
-			return -1;
-		}
-		dev_desc = sata_get_dev(sata_device_no);
-#else
-		puts("SATA isn't buildin\n");
-		return -1;
-#endif
-	} else {
-		int mmc_no = 0;
-
-		mmc_no = get_mmc_no(fastboot_env);
-
-		fastboot_devinfo.type = DEV_MMC;
-		fastboot_devinfo.dev_id = mmc_no;
-
-		printf("flash target is MMC:%d\n", mmc_no);
-		mmc = find_mmc_device(mmc_no);
-		if (mmc && mmc_init(mmc))
-			printf("MMC card init failed!\n");
-
-		dev_desc = get_dev("mmc", mmc_no);
-		if (NULL == dev_desc) {
-			printf("** Block device MMC %d not supported\n",
-				mmc_no);
-			return -1;
-		}
-
-		/* multiple boot paritions for eMMC 4.3 later */
-		if (mmc->part_config != MMCPART_NOAVAILABLE) {
-			boot_partition = 1;
-			user_partition = 0;
-		}
-	}
-
-	memset((char *)ptable, 0,
-		    sizeof(fastboot_ptentry) * (PTN_RECOVERY_INDEX + 1));
-	/* MBR */
-	strcpy(ptable[PTN_MBR_INDEX].name, "mbr");
-	ptable[PTN_MBR_INDEX].start = ANDROID_MBR_OFFSET / dev_desc->blksz;
-	ptable[PTN_MBR_INDEX].length = ANDROID_MBR_SIZE / dev_desc->blksz;
-	ptable[PTN_MBR_INDEX].partition_id = user_partition;
-	/* Bootloader */
-	strcpy(ptable[PTN_BOOTLOADER_INDEX].name, "bootloader");
-	ptable[PTN_BOOTLOADER_INDEX].start =
-				ANDROID_BOOTLOADER_OFFSET / dev_desc->blksz;
-	ptable[PTN_BOOTLOADER_INDEX].length =
-				 ANDROID_BOOTLOADER_SIZE / dev_desc->blksz;
-	ptable[PTN_BOOTLOADER_INDEX].partition_id = boot_partition;
-
-	setup_ptable_mmc_partition(PTN_KERNEL_INDEX,
-				   CONFIG_ANDROID_BOOT_PARTITION_MMC,
-				   user_partition, "boot", dev_desc, ptable);
-	setup_ptable_mmc_partition(PTN_RECOVERY_INDEX,
-				   CONFIG_ANDROID_RECOVERY_PARTITION_MMC,
-				   user_partition,
-				   "recovery", dev_desc, ptable);
-	setup_ptable_mmc_partition(PTN_SYSTEM_INDEX,
-				   CONFIG_ANDROID_SYSTEM_PARTITION_MMC,
-				   user_partition,
-				   "system", dev_desc, ptable);
-
-	for (i = 0; i <= PTN_RECOVERY_INDEX; i++)
-		fastboot_flash_add_ptn(&ptable[i]);
-
-	return 0;
-}
-#endif
-
-static void fastboot_init_strings(void)
+static void _fastboot_init_strings(void)
 {
 	struct usb_string_descriptor *string;
 
@@ -442,9 +341,10 @@ static void fastboot_init_strings(void)
 	usb_strings = fastboot_string_table;
 }
 
-static void fastboot_init_instances(void)
+static void _fastboot_init_instances(void)
 {
 	int i;
+	u16 temp;
 
 	/* Assign endpoint descriptors */
 	ep_descriptor_ptrs[0] =
@@ -457,12 +357,14 @@ static void fastboot_init_instances(void)
 		(struct usb_configuration_descriptor *)
 		&fastboot_configuration_descriptors;
 
+	fastboot_configured_flag = 0;
+
 	/* initialize device instance */
 	memset(device_instance, 0, sizeof(struct usb_device_instance));
 	device_instance->device_state = STATE_INIT;
 	device_instance->device_descriptor = &device_descriptor;
-	device_instance->event = fastboot_event_handler;
-	device_instance->cdc_recv_setup = fastboot_cdc_setup;
+	device_instance->event = _fastboot_event_handler;
+	device_instance->cdc_recv_setup = _fastboot_cdc_setup;
 	device_instance->bus = bus_instance;
 	device_instance->configurations = 1;
 	device_instance->configuration_instance_array = config_instance;
@@ -515,14 +417,19 @@ static void fastboot_init_instances(void)
 		endpoint_instance[i].rcv_attributes =
 			ep_descriptor_ptrs[i - 1]->bmAttributes;
 
+		/*fix the abort caused by unalignment*/
+		temp = *(u8 *)&ep_descriptor_ptrs[i - 1]->wMaxPacketSize;
+		temp |=
+			(*(((u8 *)&ep_descriptor_ptrs[i - 1]->wMaxPacketSize) + 1) << 8);
+
 		endpoint_instance[i].rcv_packetSize =
-			le16_to_cpu(ep_descriptor_ptrs[i - 1]->wMaxPacketSize);
+			le16_to_cpu(temp);
 
 		endpoint_instance[i].tx_attributes =
 			ep_descriptor_ptrs[i - 1]->bmAttributes;
 
 		endpoint_instance[i].tx_packetSize =
-			le16_to_cpu(ep_descriptor_ptrs[i - 1]->wMaxPacketSize);
+			le16_to_cpu(temp);
 
 		endpoint_instance[i].tx_attributes =
 			ep_descriptor_ptrs[i - 1]->bmAttributes;
@@ -546,7 +453,7 @@ static void fastboot_init_instances(void)
 	}
 }
 
-static void fastboot_init_endpoints(void)
+static void _fastboot_init_endpoints(void)
 {
 	int i;
 
@@ -555,7 +462,45 @@ static void fastboot_init_endpoints(void)
 		udc_setup_ep(device_instance, i, &endpoint_instance[i]);
 }
 
-static int fill_buffer(u8 *buf)
+static void _fastboot_destroy_endpoints(void)
+{
+	int i;
+	struct urb *tx_urb;
+
+	for (i = 1; i <= NUM_ENDPOINTS; i++) {
+		/*dealloc urb*/
+		if (endpoint_instance[i].endpoint_address & USB_DIR_IN) {
+			if (endpoint_instance[i].tx_urb)
+				usbd_dealloc_urb(endpoint_instance[i].tx_urb);
+
+			while (endpoint_instance[i].tx_queue) {
+				tx_urb = first_urb_detached(&endpoint_instance[i].tx);
+				if (tx_urb) {
+					usbd_dealloc_urb(tx_urb);
+					endpoint_instance[i].tx_queue--;
+				} else {
+					break;
+				}
+			}
+			endpoint_instance[i].tx_queue = 0;
+
+			do {
+				tx_urb = first_urb_detached(&endpoint_instance[i].done);
+				if (tx_urb)
+					usbd_dealloc_urb(tx_urb);
+			} while (tx_urb);
+
+		} else {
+			if (endpoint_instance[i].rcv_urb)
+				usbd_dealloc_urb(endpoint_instance[i].rcv_urb);
+		}
+
+		udc_destroy_ep(device_instance, &endpoint_instance[i]);
+	}
+}
+
+
+static int _fill_buffer(u8 *buf)
 {
 	struct usb_endpoint_instance *endpoint =
 					&endpoint_instance[rx_endpoint];
@@ -575,7 +520,7 @@ static int fill_buffer(u8 *buf)
 	return 0;
 }
 
-static struct urb *next_urb(struct usb_device_instance *device,
+static struct urb *_next_urb(struct usb_device_instance *device,
 				struct usb_endpoint_instance *endpoint)
 {
 	struct urb *current_urb = NULL;
@@ -605,6 +550,36 @@ static struct urb *next_urb(struct usb_device_instance *device,
 	return current_urb;
 }
 
+static int _fastboot_usb_configured(void)
+{
+	return fastboot_configured_flag;
+}
+
+static void _fastboot_event_handler(struct usb_device_instance *device,
+				  usb_device_event_t event, int data)
+{
+	switch (event) {
+	case DEVICE_RESET:
+	case DEVICE_BUS_INACTIVE:
+		fastboot_configured_flag = 0;
+		break;
+	case DEVICE_CONFIGURED:
+		fastboot_configured_flag = 1;
+		_fastboot_init_endpoints();
+		break;
+	case DEVICE_ADDRESS_ASSIGNED:
+	default:
+		break;
+	}
+}
+
+static int _fastboot_cdc_setup(struct usb_device_request *request,
+	struct urb *urb)
+{
+	return 0;
+}
+
+
 /*!
  * Function to receive data from host through channel
  *
@@ -617,7 +592,7 @@ int fastboot_usb_recv(u8 *buf, int count)
 {
 	int len = 0;
 
-	while (!fastboot_usb_configured())
+	while (!_fastboot_usb_configured())
 		udc_irq();
 
 	/* update rxqueue to wait new data */
@@ -633,8 +608,8 @@ int fastboot_usb_recv(u8 *buf, int count)
 			return 0;
 		}
 		udc_irq();
-		if (fastboot_usb_configured())
-			len = fill_buffer(buf);
+		if (_fastboot_usb_configured())
+			len = _fill_buffer(buf);
 	}
 	return len;
 }
@@ -681,16 +656,17 @@ int fastboot_tx(unsigned char *buffer, unsigned int buffer_size)
 	return 0;
 }
 
-static int write_buffer(const char *buffer, unsigned int buffer_size)
+static int _fastboot_write_buffer(const char *buffer,
+	unsigned int buffer_size)
 {
 	struct usb_endpoint_instance *endpoint =
 		(struct usb_endpoint_instance *)&endpoint_instance[tx_endpoint];
 	struct urb *current_urb = NULL;
 
-	if (!fastboot_usb_configured())
+	if (!_fastboot_usb_configured())
 		return 0;
 
-	current_urb = next_urb(device_instance, endpoint);
+	current_urb = _next_urb(device_instance, endpoint);
 	if (buffer_size) {
 		char *dest;
 		int space_avail, popnum, count, total = 0;
@@ -736,7 +712,7 @@ int fastboot_tx_status(const char *buffer, unsigned int buffer_size)
 	int len = 0;
 
 	while (buffer_size > 0) {
-		len = write_buffer(buffer + len, buffer_size);
+		len = _fastboot_write_buffer(buffer + len, buffer_size);
 		buffer_size -= len;
 
 		udc_irq();
@@ -750,201 +726,402 @@ void fastboot_shutdown(void)
 {
 	usb_shutdown();
 
-	/* Reset some globals */
-	fastboot_interface = NULL;
-}
-
-static int fastboot_usb_configured(void)
-{
-	return fastboot_configured_flag;
-}
-
-static void fastboot_event_handler(struct usb_device_instance *device,
-				  usb_device_event_t event, int data)
-{
-	switch (event) {
-	case DEVICE_RESET:
-	case DEVICE_BUS_INACTIVE:
-		fastboot_configured_flag = 0;
-		break;
-	case DEVICE_CONFIGURED:
-		fastboot_configured_flag = 1;
-		fastboot_init_endpoints();
-		break;
-	case DEVICE_ADDRESS_ASSIGNED:
-	default:
-		break;
+	/* Reset interface*/
+	if (fastboot_interface &&
+		fastboot_interface->reset_handler) {
+		fastboot_interface->reset_handler();
 	}
+
+	/* Reset some globals */
+	_fastboot_destroy_endpoints();
+	fastboot_interface = NULL;
+	fastboot_configured_flag = 0;
+	usb_disconnected = 0;
+
+	/*free memory*/
+	udc_destroy();
 }
 
-static int fastboot_cdc_setup(struct usb_device_request *request, struct urb *urb)
+/*
+ * CPU and board-specific fastboot initializations.  Aliased function
+ * signals caller to move on
+ */
+static void __def_fastboot_setup(void)
 {
-	return 0;
+	/*do nothing here*/
+}
+void board_fastboot_setup(void) \
+	__attribute__((weak, alias("__def_fastboot_setup")));
+
+
+void fastboot_setup(void)
+{
+	/*execute board relevant initilizations for preparing fastboot */
+	board_fastboot_setup();
+
+	/*get the fastboot dev*/
+	_fastboot_setup_dev();
+
+	/*check if we need to setup recovery*/
+#ifdef CONFIG_ANDROID_RECOVERY
+    check_recovery_mode();
+#endif
+
+	/*load partitions information for the fastboot dev*/
+	_fastboot_load_partitions();
 }
 
 /* export to lib_arm/board.c */
-void check_fastboot_mode(void)
+void check_fastboot(void)
 {
 	if (fastboot_check_and_clean_flag())
 		do_fastboot(NULL, 0, 0, 0);
 }
 
-u8 fastboot_debug_level;
-void fastboot_dump_memory(u32 *ptr, u32 len)
-{
-    u32 i;
-    for (i = 0; i < len; i++) {
-	DBG_DEBUG("0x%p: %08x %08x %08x %08x\n", ptr,
-			*ptr, *(ptr+1), *(ptr+2), *(ptr+3));
-	ptr += 4;
-    }
-}
-
-#define FASTBOOT_STS_CMD 0
-#define FASTBOOT_STS_CMD_WAIT 1
-#define FASTBOOT_STS_DATA 2
-#define FASTBOOT_STS_DATA_WAIT 3
-
-static u8 fastboot_status;
-static u8 g_fastboot_recvbuf[MAX_PAKET_LEN];
-static u8 g_fastboot_sendbuf[MAX_PAKET_LEN];
-
-static u32 g_fastboot_datalen;
-static u8 g_fastboot_outep_index, g_fastboot_inep_index;
-static u8 g_usb_connected;
-
-void fastboot_get_ep_num(u8 *in, u8 *out)
-{
-    if (out)
-	*out = rx_endpoint + EP0_OUT_INDEX + 1;
-    if (in)
-	*in = tx_endpoint + EP0_IN_INDEX + 1;
-}
-
-static void fastboot_data_handler(u32 len, u8 *recvbuf)
-{
-    if (len != g_fastboot_datalen)
-	DBG_ERR("Fastboot data recv error, want:%d, recv:%d\n",
-					g_fastboot_datalen, len);
-    sprintf((char *)g_fastboot_sendbuf, "OKAY");
-    udc_send_data(g_fastboot_inep_index, g_fastboot_sendbuf, 4, NULL);
-    fastboot_status = FASTBOOT_STS_CMD;
-}
-
-static void fastboot_cmd_handler(u32 len, u8 *recvbuf)
-{
-    u32 *databuf = (u32 *)CONFIG_FASTBOOT_TRANSFER_BUF;
-
-    if (len > sizeof(g_fastboot_recvbuf)) {
-	DBG_ERR("%s, recv len=%d error\n", __func__, len);
-	return;
-    }
-    recvbuf[len] = 0;
-    DBG_ALWS("\nFastboot Cmd, len=%u, %s\n", len, recvbuf);
-
-    if (memcmp(recvbuf, "download:", 9) == 0) {
-	g_fastboot_datalen = simple_strtoul((const char *)recvbuf + 9,
-								NULL, 16);
-	if (g_fastboot_datalen > CONFIG_FASTBOOT_TRANSFER_BUF_SIZE) {
-		DBG_ERR("Download too much data\n");
-		sprintf((char *)g_fastboot_sendbuf, "FAIL");
-		udc_send_data(g_fastboot_inep_index, g_fastboot_sendbuf,
-								4, NULL);
-		fastboot_status = FASTBOOT_STS_CMD;
-	} else {
-		sprintf((char *)g_fastboot_sendbuf, "DATA%08x",
-							g_fastboot_datalen);
-		udc_send_data(g_fastboot_inep_index, g_fastboot_sendbuf,
-								12, NULL);
-		DBG_ALWS("Fastboot is receiveing data...\n");
-		udc_recv_data(g_fastboot_outep_index, (u8 *)databuf,
-				g_fastboot_datalen, fastboot_data_handler);
-		fastboot_status = FASTBOOT_STS_DATA_WAIT;
-	}
-    } else if (memcmp(recvbuf, "flash:", 6) == 0) {
-		if (g_fastboot_datalen ==
-			fastboot_write_storage(recvbuf+6, g_fastboot_datalen)) {
-			DBG_ALWS("Fastboot write OK, send OKAY...\n");
-			sprintf((char *)g_fastboot_sendbuf, "OKAY");
-			udc_send_data(g_fastboot_inep_index, g_fastboot_sendbuf,
-								4, NULL);
-		} else {
-			DBG_ERR("Fastboot write error, write 0x%x\n",
-							g_fastboot_datalen);
-			sprintf((char *)g_fastboot_sendbuf, "FAIL");
-			udc_send_data(g_fastboot_inep_index, g_fastboot_sendbuf,
-								4, NULL);
-		}
-		g_fastboot_datalen = 0;
-		fastboot_status = FASTBOOT_STS_CMD;
-    } else if (memcmp(recvbuf, "reboot", 6) == 0) {
-			sprintf((char *)g_fastboot_sendbuf, "OKAY");
-			udc_send_data(g_fastboot_inep_index, g_fastboot_sendbuf,
-								4, NULL);
-			udelay(100000); /* 1 sec */
-
-			do_reset(NULL, 0, 0, NULL);
-
-    } else {
-		DBG_ERR("Not support command:%s\n", recvbuf);
-		sprintf((char *)g_fastboot_sendbuf, "FAIL");
-		udc_send_data(g_fastboot_inep_index, g_fastboot_sendbuf,
-								4, NULL);
-		g_fastboot_datalen = 0;
-		fastboot_status = FASTBOOT_STS_CMD;
-    }
-}
-
-static struct cmd_fastboot_interface interface = {
-    .rx_handler            = NULL,
-    .reset_handler         = NULL,
-    .product_name          = NULL,
-    .serial_no             = NULL,
-    .nand_block_size       = 0,
-    .transfer_buffer       = (unsigned char *)0xffffffff,
-    .transfer_buffer_size  = 0,
-};
-
-/*
- * fastboot main process, only support 'download', 'flash' 'reboot' command now
- *
- * @debug  control debug level, support three level now,
- *	   0(normal), 1(debug), 2(info), default is 0
+#if defined(CONFIG_FASTBOOT_STORAGE_SATA) \
+	|| defined(CONFIG_FASTBOOT_STORAGE_MMC)
+/**
+   @mmc_dos_partition_index: the partition index in mbr.
+   @mmc_partition_index: the boot partition or user partition index,
+   not related to the partition table.
  */
-void fastboot_quick(u8 debug)
+static int _fastboot_parts_add_ptable_entry(int ptable_index,
+				      int mmc_dos_partition_index,
+				      int mmc_partition_index,
+				      const char *name,
+				      block_dev_desc_t *dev_desc,
+				      struct fastboot_ptentry *ptable)
 {
-    u32 plug_cnt = 0;
-    if (debug > 2)
-	debug = 0;
-    fastboot_debug_level = debug;
+	disk_partition_t info;
+	strcpy(ptable[ptable_index].name, name);
 
-    fastboot_init(&interface);
-    fastboot_get_ep_num(&g_fastboot_inep_index, &g_fastboot_outep_index);
-    DBG_INFO("g_fastboot_inep_index=%d, g_fastboot_outep_index=%d\n",
-		g_fastboot_inep_index, g_fastboot_outep_index);
-    while (++plug_cnt) {
-	fastboot_status = FASTBOOT_STS_CMD;
-	udc_hal_data_init();
-	udc_run();
-	if (plug_cnt > 1)
-		DBG_ALWS("wait usb cable into the connector!\n");
-	udc_wait_connect();
-	g_usb_connected = 1;
-	if (plug_cnt > 1)
-		DBG_ALWS("USB Mini b cable Connected!\n");
-	while (g_usb_connected) {
-		int usb_irq = udc_irq_handler();
-		if (usb_irq > 0) {
-			if (fastboot_status == FASTBOOT_STS_CMD) {
-				memset(g_fastboot_recvbuf, 0 , MAX_PAKET_LEN);
-				udc_recv_data(g_fastboot_outep_index,
-					g_fastboot_recvbuf, MAX_PAKET_LEN,
-					fastboot_cmd_handler);
-				fastboot_status = FASTBOOT_STS_CMD_WAIT;
+	if (get_partition_info(dev_desc,
+			       mmc_dos_partition_index, &info)) {
+		printf("Bad partition index:%d for partition:%s\n",
+		       mmc_dos_partition_index, name);
+		return -1;
+	} else {
+		ptable[ptable_index].start = info.start;
+		ptable[ptable_index].length = info.size;
+		ptable[ptable_index].partition_id = mmc_partition_index;
+	}
+	return 0;
+}
+
+static int _fastboot_parts_load_from_ptable(void)
+{
+	int i;
+#ifdef CONFIG_CMD_SATA
+	int sata_device_no;
+#endif
+
+	/* mmc boot partition: -1 means no partition, 0 user part., 1 boot part.
+	 * default is no partition, for emmc default user part, except emmc*/
+	int boot_partition = FASTBOOT_MMC_NONE_PARTITION_ID;
+    int user_partition = FASTBOOT_MMC_NONE_PARTITION_ID;
+
+	struct mmc *mmc;
+	block_dev_desc_t *dev_desc;
+	struct fastboot_ptentry ptable[PTN_RECOVERY_INDEX + 1];
+
+	/* sata case in env */
+	if (fastboot_devinfo.type == DEV_SATA) {
+#ifdef CONFIG_CMD_SATA
+		puts("flash target is SATA\n");
+		if (sata_initialize())
+			return -1;
+		sata_device_no = CONFIG_FASTBOOT_SATA_NO;
+		if (sata_device_no >= CONFIG_SYS_SATA_MAX_DEVICE) {
+			printf("Unknown SATA(%d) device for fastboot\n",
+				sata_device_no);
+			return -1;
+		}
+		dev_desc = sata_get_dev(sata_device_no);
+#else /*! CONFIG_CMD_SATA*/
+		puts("SATA isn't buildin\n");
+		return -1;
+#endif /*! CONFIG_CMD_SATA*/
+	} else if (fastboot_devinfo.type == DEV_MMC) {
+		int mmc_no = 0;
+		mmc_no = fastboot_devinfo.dev_id;
+
+		printf("flash target is MMC:%d\n", mmc_no);
+		mmc = find_mmc_device(mmc_no);
+		if (mmc && mmc_init(mmc))
+			printf("MMC card init failed!\n");
+
+		dev_desc = get_dev("mmc", mmc_no);
+		if (NULL == dev_desc) {
+			printf("** Block device MMC %d not supported\n",
+				mmc_no);
+			return -1;
+		}
+
+		/* multiple boot paritions for eMMC 4.3 later */
+		if (mmc->part_config != MMCPART_NOAVAILABLE) {
+			boot_partition = FASTBOOT_MMC_BOOT_PARTITION_ID;
+			user_partition = FASTBOOT_MMC_USER_PARTITION_ID;
+		}
+	} else {
+		printf("Can't setup partition table on this device %d\n",
+			fastboot_devinfo.type);
+		return -1;
+	}
+
+	memset((char *)ptable, 0,
+		    sizeof(struct fastboot_ptentry) * (PTN_RECOVERY_INDEX + 1));
+	/* MBR */
+	strcpy(ptable[PTN_MBR_INDEX].name, "mbr");
+	ptable[PTN_MBR_INDEX].start = ANDROID_MBR_OFFSET / dev_desc->blksz;
+	ptable[PTN_MBR_INDEX].length = ANDROID_MBR_SIZE / dev_desc->blksz;
+	ptable[PTN_MBR_INDEX].partition_id = user_partition;
+	/* Bootloader */
+	strcpy(ptable[PTN_BOOTLOADER_INDEX].name, "bootloader");
+	ptable[PTN_BOOTLOADER_INDEX].start =
+				ANDROID_BOOTLOADER_OFFSET / dev_desc->blksz;
+	ptable[PTN_BOOTLOADER_INDEX].length =
+				 ANDROID_BOOTLOADER_SIZE / dev_desc->blksz;
+	ptable[PTN_BOOTLOADER_INDEX].partition_id = boot_partition;
+
+	_fastboot_parts_add_ptable_entry(PTN_KERNEL_INDEX,
+				   CONFIG_ANDROID_BOOT_PARTITION_MMC,
+				   user_partition, "boot", dev_desc, ptable);
+	_fastboot_parts_add_ptable_entry(PTN_RECOVERY_INDEX,
+				   CONFIG_ANDROID_RECOVERY_PARTITION_MMC,
+				   user_partition,
+				   "recovery", dev_desc, ptable);
+	_fastboot_parts_add_ptable_entry(PTN_SYSTEM_INDEX,
+				   CONFIG_ANDROID_SYSTEM_PARTITION_MMC,
+				   user_partition,
+				   "system", dev_desc, ptable);
+
+	for (i = 0; i <= PTN_RECOVERY_INDEX; i++)
+		fastboot_flash_add_ptn(&ptable[i]);
+
+	return 0;
+}
+#endif /*CONFIG_FASTBOOT_STORAGE_SATA || CONFIG_FASTBOOT_STORAGE_MMC*/
+
+#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
+static unsigned long long _memparse(char *ptr, char **retptr)
+{
+	char *endptr;	/* local pointer to end of parsed string */
+
+	unsigned long ret = simple_strtoul(ptr, &endptr, 0);
+
+	switch (*endptr) {
+	case 'M':
+	case 'm':
+		ret <<= 10;
+	case 'K':
+	case 'k':
+		ret <<= 10;
+		endptr++;
+	default:
+		break;
+	}
+
+	if (retptr)
+		*retptr = endptr;
+
+	return ret;
+}
+
+static int _fastboot_parts_add_env_entry(char *s, char **retptr)
+{
+	unsigned long size;
+	unsigned long offset = 0;
+	char *name;
+	int name_len;
+	int delim;
+	unsigned int flags;
+	struct fastboot_ptentry part;
+
+	size = _memparse(s, &s);
+	if (0 == size) {
+		printf("Error:FASTBOOT size of parition is 0\n");
+		return 1;
+	}
+
+	/* fetch partition name and flags */
+	flags = 0; /* this is going to be a regular partition */
+	delim = 0;
+	/* check for offset */
+	if (*s == '@') {
+		s++;
+		offset = _memparse(s, &s);
+	} else {
+		printf("Error:FASTBOOT offset of parition is not given\n");
+		return 1;
+	}
+
+	/* now look for name */
+	if (*s == '(')
+		delim = ')';
+
+	if (delim) {
+		char *p;
+
+		name = ++s;
+		p = strchr((const char *)name, delim);
+		if (!p) {
+			printf("Error:FASTBOOT no closing %c found in partition name\n",
+				delim);
+			return 1;
+		}
+		name_len = p - name;
+		s = p + 1;
+	} else {
+		printf("Error:FASTBOOT no partition name for \'%s\'\n", s);
+		return 1;
+	}
+
+	/* check for options */
+	while (1) {
+		if (strncmp(s, "i", 1) == 0) {
+			flags |= FASTBOOT_PTENTRY_FLAGS_WRITE_I;
+			s += 1;
+		} else if (strncmp(s, "ubifs", 5) == 0) {
+			/* ubifs */
+			flags |= FASTBOOT_PTENTRY_FLAGS_WRITE_TRIMFFS;
+			s += 5;
+		} else {
+			break;
+		}
+		if (strncmp(s, "|", 1) == 0)
+			s += 1;
+	}
+
+	/* enter this partition (offset will be calculated later if it is zero at this point) */
+	part.length = size;
+	part.start = offset;
+	part.flags = flags;
+
+	if (name) {
+		if (name_len >= sizeof(part.name)) {
+			printf("Error:FASTBOOT partition name is too long\n");
+			return 1;
+		}
+		strncpy(&part.name[0], name, name_len);
+		/* name is not null terminated */
+		part.name[name_len] = '\0';
+	} else {
+		printf("Error:FASTBOOT no name\n");
+		return 1;
+	}
+
+	fastboot_flash_add_ptn(&part);
+
+	/*if the nand partitions envs are not initialized, try to init them*/
+	if (check_parts_values(&part))
+		save_parts_values(&part, part.start, part.length);
+
+	/* return (updated) pointer command line string */
+	*retptr = s;
+
+	/* return partition table */
+	return 0;
+}
+
+static int _fastboot_parts_load_from_env(void)
+{
+	char fbparts[FASTBOOT_FBPARTS_ENV_MAX_LEN], *env;
+
+	env = getenv("fbparts");
+	if (env) {
+		unsigned int len;
+		len = strlen(env);
+		if (len && len < FASTBOOT_FBPARTS_ENV_MAX_LEN) {
+			char *s, *e;
+
+			memcpy(&fbparts[0], env, len + 1);
+			printf("Fastboot: Adding partitions from environment\n");
+			s = &fbparts[0];
+			e = s + len;
+			while (s < e) {
+				if (_fastboot_parts_add_env_entry(s, &s)) {
+					printf("Error:Fastboot: Abort adding partitions\n");
+					pcount = 0;
+					return 1;
+				}
+				/* Skip a bunch of delimiters */
+				while (s < e) {
+					if ((' ' == *s) ||
+					    ('\t' == *s) ||
+					    ('\n' == *s) ||
+					    ('\r' == *s) ||
+					    (',' == *s)) {
+						s++;
+					} else {
+						break;
+					}
+				}
 			}
 		}
-		if (usb_irq < 0)
-			g_usb_connected = 0;
 	}
-    }
+
+	return 0;
+}
+#endif /*CONFIG_FASTBOOT_STORAGE_NAND*/
+
+static void _fastboot_load_partitions(void)
+{
+	pcount = 0;
+#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
+	_fastboot_parts_load_from_env();
+#elif defined(CONFIG_FASTBOOT_STORAGE_SATA) \
+	|| defined(CONFIG_FASTBOOT_STORAGE_MMC)
+	_fastboot_parts_load_from_ptable();
+#endif
+}
+
+/*
+ * Android style flash utilties */
+void fastboot_flash_add_ptn(struct fastboot_ptentry *ptn)
+{
+	if (pcount < MAX_PTN) {
+		memcpy(ptable + pcount, ptn, sizeof(struct fastboot_ptentry));
+		pcount++;
+	}
+}
+
+void fastboot_flash_dump_ptn(void)
+{
+	unsigned int n;
+	for (n = 0; n < pcount; n++) {
+		struct fastboot_ptentry *ptn = ptable + n;
+		printf("ptn %d name='%s' start=%d len=%d\n",
+			n, ptn->name, ptn->start, ptn->length);
+	}
+}
+
+
+struct fastboot_ptentry *fastboot_flash_find_ptn(const char *name)
+{
+	unsigned int n;
+
+	for (n = 0; n < pcount; n++) {
+		/* Make sure a substring is not accepted */
+		if (strlen(name) == strlen(ptable[n].name)) {
+			if (0 == strcmp(ptable[n].name, name))
+				return ptable + n;
+		}
+	}
+
+	printf("can't find partition: %s, dump the partition table\n", name);
+	fastboot_flash_dump_ptn();
+	return 0;
+}
+
+struct fastboot_ptentry *fastboot_flash_get_ptn(unsigned int n)
+{
+	if (n < pcount)
+		return ptable + n;
+	else
+		return 0;
+}
+
+unsigned int fastboot_flash_get_ptn_count(void)
+{
+	return pcount;
 }

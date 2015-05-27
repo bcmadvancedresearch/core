@@ -55,7 +55,8 @@ static DEFINE_PER_CPU(int, irq_depth);
 
 /* State for allocating IRQs on Gx. */
 #if CHIP_HAS_IPI()
-static unsigned long available_irqs = ~(1UL << IRQ_RESCHEDULE);
+static unsigned long available_irqs = ((1UL << NR_IRQS) - 1) &
+				      (~(1UL << IRQ_RESCHEDULE));
 static DEFINE_SPINLOCK(available_irqs_lock);
 #endif
 
@@ -73,7 +74,8 @@ static DEFINE_SPINLOCK(available_irqs_lock);
 
 /*
  * The interrupt handling path, implemented in terms of HV interrupt
- * emulation on TILE64 and TILEPro, and IPI hardware on TILE-Gx.
+ * emulation on TILEPro, and IPI hardware on TILE-Gx.
+ * Entered with interrupts disabled.
  */
 void tile_dev_intr(struct pt_regs *regs, int intnum)
 {
@@ -152,14 +154,13 @@ void tile_dev_intr(struct pt_regs *regs, int intnum)
  * Remove an irq from the disabled mask.  If we're in an interrupt
  * context, defer enabling the HW interrupt until we leave.
  */
-void enable_percpu_irq(unsigned int irq)
+static void tile_irq_chip_enable(struct irq_data *d)
 {
-	get_cpu_var(irq_disable_mask) &= ~(1UL << irq);
+	get_cpu_var(irq_disable_mask) &= ~(1UL << d->irq);
 	if (__get_cpu_var(irq_depth) == 0)
-		unmask_irqs(1UL << irq);
+		unmask_irqs(1UL << d->irq);
 	put_cpu_var(irq_disable_mask);
 }
-EXPORT_SYMBOL(enable_percpu_irq);
 
 /*
  * Add an irq to the disabled mask.  We disable the HW interrupt
@@ -167,13 +168,12 @@ EXPORT_SYMBOL(enable_percpu_irq);
  * in an interrupt context, the return path is careful to avoid
  * unmasking a newly disabled interrupt.
  */
-void disable_percpu_irq(unsigned int irq)
+static void tile_irq_chip_disable(struct irq_data *d)
 {
-	get_cpu_var(irq_disable_mask) |= (1UL << irq);
-	mask_irqs(1UL << irq);
+	get_cpu_var(irq_disable_mask) |= (1UL << d->irq);
+	mask_irqs(1UL << d->irq);
 	put_cpu_var(irq_disable_mask);
 }
-EXPORT_SYMBOL(disable_percpu_irq);
 
 /* Mask an interrupt. */
 static void tile_irq_chip_mask(struct irq_data *d)
@@ -209,6 +209,8 @@ static void tile_irq_chip_eoi(struct irq_data *d)
 
 static struct irq_chip tile_irq_chip = {
 	.name = "tile_irq_chip",
+	.irq_enable = tile_irq_chip_enable,
+	.irq_disable = tile_irq_chip_disable,
 	.irq_ack = tile_irq_chip_ack,
 	.irq_eoi = tile_irq_chip_eoi,
 	.irq_mask = tile_irq_chip_mask,
@@ -220,7 +222,7 @@ void __init init_IRQ(void)
 	ipi_init();
 }
 
-void __cpuinit setup_irq_regs(void)
+void setup_irq_regs(void)
 {
 	/* Enable interrupt delivery. */
 	unmask_irqs(~0UL);
@@ -233,7 +235,7 @@ void tile_irq_activate(unsigned int irq, int tile_irq_type)
 {
 	/*
 	 * We use handle_level_irq() by default because the pending
-	 * interrupt vector (whether modeled by the HV on TILE64 and
+	 * interrupt vector (whether modeled by the HV on
 	 * TILEPro or implemented in hardware on TILE-Gx) has
 	 * level-style semantics for each bit.  An interrupt fires
 	 * whenever a bit is high, not just at edges.

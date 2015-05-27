@@ -3,24 +3,7 @@
  * Heiko Schocher, hs@denx.de
  * Based on ACE1XK.c
  *
- * See file CREDITS for list of people who contributed to this
- * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
- *
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 #include <common.h>		/* core U-Boot definitions */
@@ -47,14 +30,13 @@
 #define CONFIG_SYS_FPGA_WAIT CONFIG_SYS_HZ/10		/* 100 ms */
 #endif
 
-static int CYC2_ps_load( Altera_desc *desc, void *buf, size_t bsize );
-static int CYC2_ps_dump( Altera_desc *desc, void *buf, size_t bsize );
+static int CYC2_ps_load(Altera_desc *desc, const void *buf, size_t bsize);
+static int CYC2_ps_dump(Altera_desc *desc, const void *buf, size_t bsize);
 /* static int CYC2_ps_info( Altera_desc *desc ); */
-static int CYC2_ps_reloc( Altera_desc *desc, ulong reloc_offset );
 
 /* ------------------------------------------------------------------------- */
 /* CYCLON2 Generic Implementation */
-int CYC2_load (Altera_desc * desc, void *buf, size_t bsize)
+int CYC2_load(Altera_desc *desc, const void *buf, size_t bsize)
 {
 	int ret_val = FPGA_FAIL;
 
@@ -62,6 +44,16 @@ int CYC2_load (Altera_desc * desc, void *buf, size_t bsize)
 	case passive_serial:
 		PRINTF ("%s: Launching Passive Serial Loader\n", __FUNCTION__);
 		ret_val = CYC2_ps_load (desc, buf, bsize);
+		break;
+
+	case fast_passive_parallel:
+		/* Fast Passive Parallel (FPP) and PS only differ in what is
+		 * done in the write() callback. Use the existing PS load
+		 * function for FPP, too.
+		 */
+		PRINTF ("%s: Launching Fast Passive Parallel Loader\n",
+		      __FUNCTION__);
+		ret_val = CYC2_ps_load(desc, buf, bsize);
 		break;
 
 		/* Add new interface types here */
@@ -74,7 +66,7 @@ int CYC2_load (Altera_desc * desc, void *buf, size_t bsize)
 	return ret_val;
 }
 
-int CYC2_dump (Altera_desc * desc, void *buf, size_t bsize)
+int CYC2_dump(Altera_desc *desc, const void *buf, size_t bsize)
 {
 	int ret_val = FPGA_FAIL;
 
@@ -99,33 +91,9 @@ int CYC2_info( Altera_desc *desc )
 	return FPGA_SUCCESS;
 }
 
-int CYC2_reloc (Altera_desc * desc, ulong reloc_offset)
-{
-	int ret_val = FPGA_FAIL;	/* assume a failure */
-
-	if (desc->family != Altera_CYC2) {
-		printf ("%s: Unsupported family type, %d\n",
-				__FUNCTION__, desc->family);
-		return FPGA_FAIL;
-	} else
-		switch (desc->iface) {
-		case passive_serial:
-			ret_val = CYC2_ps_reloc (desc, reloc_offset);
-			break;
-
-		/* Add new interface types here */
-
-		default:
-			printf ("%s: Unsupported interface type, %d\n",
-					__FUNCTION__, desc->iface);
-		}
-
-	return ret_val;
-}
-
 /* ------------------------------------------------------------------------- */
 /* CYCLON2 Passive Serial Generic Implementation                                  */
-static int CYC2_ps_load (Altera_desc * desc, void *buf, size_t bsize)
+static int CYC2_ps_load(Altera_desc *desc, const void *buf, size_t bsize)
 {
 	int ret_val = FPGA_FAIL;	/* assume the worst */
 	Altera_CYC2_Passive_Serial_fns *fn = desc->iface_fns;
@@ -159,7 +127,9 @@ static int CYC2_ps_load (Altera_desc * desc, void *buf, size_t bsize)
 		}
 
 		/* Establish the initial state */
-		(*fn->config) (TRUE, TRUE, cookie);	/* Assert nCONFIG */
+		(*fn->config) (false, true, cookie);	/* De-assert nCONFIG */
+		udelay(100);
+		(*fn->config) (true, true, cookie);	/* Assert nCONFIG */
 
 		udelay(2);		/* T_cfg > 2us	*/
 
@@ -177,7 +147,7 @@ static int CYC2_ps_load (Altera_desc * desc, void *buf, size_t bsize)
 		/* Get ready for the burn */
 		CONFIG_FPGA_DELAY ();
 
-		ret = (*fn->write) (buf, bsize, TRUE, cookie);
+		ret = (*fn->write) (buf, bsize, true, cookie);
 		if (ret) {
 			puts ("** Write failed.\n");
 			(*fn->abort) (cookie);
@@ -225,77 +195,11 @@ static int CYC2_ps_load (Altera_desc * desc, void *buf, size_t bsize)
 	return ret_val;
 }
 
-static int CYC2_ps_dump (Altera_desc * desc, void *buf, size_t bsize)
+static int CYC2_ps_dump(Altera_desc *desc, const void *buf, size_t bsize)
 {
 	/* Readback is only available through the Slave Parallel and         */
 	/* boundary-scan interfaces.                                         */
 	printf ("%s: Passive Serial Dumping is unavailable\n",
 			__FUNCTION__);
 	return FPGA_FAIL;
-}
-
-static int CYC2_ps_reloc (Altera_desc * desc, ulong reloc_offset)
-{
-	int ret_val = FPGA_FAIL;	/* assume the worst */
-	Altera_CYC2_Passive_Serial_fns *fn_r, *fn =
-			(Altera_CYC2_Passive_Serial_fns *) (desc->iface_fns);
-
-	if (fn) {
-		ulong addr;
-
-		/* Get the relocated table address */
-		addr = (ulong) fn + reloc_offset;
-		fn_r = (Altera_CYC2_Passive_Serial_fns *) addr;
-
-		if (!fn_r->relocated) {
-
-			if (memcmp (fn_r, fn,
-						sizeof (Altera_CYC2_Passive_Serial_fns))
-				== 0) {
-				/* good copy of the table, fix the descriptor pointer */
-				desc->iface_fns = fn_r;
-			} else {
-				PRINTF ("%s: Invalid function table at 0x%p\n",
-						__FUNCTION__, fn_r);
-				return FPGA_FAIL;
-			}
-
-			PRINTF ("%s: Relocating descriptor at 0x%p\n", __FUNCTION__,
-					desc);
-
-			addr = (ulong) (fn->pre) + reloc_offset;
-			fn_r->pre = (Altera_pre_fn) addr;
-
-			addr = (ulong) (fn->config) + reloc_offset;
-			fn_r->config = (Altera_config_fn) addr;
-
-			addr = (ulong) (fn->status) + reloc_offset;
-			fn_r->status = (Altera_status_fn) addr;
-
-			addr = (ulong) (fn->done) + reloc_offset;
-			fn_r->done = (Altera_done_fn) addr;
-
-			addr = (ulong) (fn->write) + reloc_offset;
-			fn_r->write = (Altera_write_fn) addr;
-
-			addr = (ulong) (fn->abort) + reloc_offset;
-			fn_r->abort = (Altera_abort_fn) addr;
-
-			addr = (ulong) (fn->post) + reloc_offset;
-			fn_r->post = (Altera_post_fn) addr;
-
-			fn_r->relocated = TRUE;
-
-		} else {
-			/* this table has already been moved */
-			/* XXX - should check to see if the descriptor is correct */
-			desc->iface_fns = fn_r;
-		}
-
-		ret_val = FPGA_SUCCESS;
-	} else {
-		printf ("%s: NULL Interface function table!\n", __FUNCTION__);
-	}
-
-	return ret_val;
 }

@@ -25,7 +25,6 @@
 
 #include <linux/bio.h>
 #include <linux/blkdev.h>
-#include <linux/buffer_head.h>
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
@@ -104,39 +103,36 @@ axon_ram_irq_handler(int irq, void *dev)
  * axon_ram_make_request - make_request() method for block device
  * @queue, @bio: see blk_queue_make_request()
  */
-static int
+static void
 axon_ram_make_request(struct request_queue *queue, struct bio *bio)
 {
 	struct axon_ram_bank *bank = bio->bi_bdev->bd_disk->private_data;
 	unsigned long phys_mem, phys_end;
 	void *user_mem;
-	struct bio_vec *vec;
+	struct bio_vec vec;
 	unsigned int transfered;
-	unsigned short idx;
-	int rc = 0;
+	struct bvec_iter iter;
 
-	phys_mem = bank->io_addr + (bio->bi_sector << AXON_RAM_SECTOR_SHIFT);
+	phys_mem = bank->io_addr + (bio->bi_iter.bi_sector <<
+				    AXON_RAM_SECTOR_SHIFT);
 	phys_end = bank->io_addr + bank->size;
 	transfered = 0;
-	bio_for_each_segment(vec, bio, idx) {
-		if (unlikely(phys_mem + vec->bv_len > phys_end)) {
+	bio_for_each_segment(vec, bio, iter) {
+		if (unlikely(phys_mem + vec.bv_len > phys_end)) {
 			bio_io_error(bio);
-			rc = -ERANGE;
-			break;
+			return;
 		}
 
-		user_mem = page_address(vec->bv_page) + vec->bv_offset;
+		user_mem = page_address(vec.bv_page) + vec.bv_offset;
 		if (bio_data_dir(bio) == READ)
-			memcpy(user_mem, (void *) phys_mem, vec->bv_len);
+			memcpy(user_mem, (void *) phys_mem, vec.bv_len);
 		else
-			memcpy((void *) phys_mem, user_mem, vec->bv_len);
+			memcpy((void *) phys_mem, user_mem, vec.bv_len);
 
-		phys_mem += vec->bv_len;
-		transfered += vec->bv_len;
+		phys_mem += vec.bv_len;
+		transfered += vec.bv_len;
 	}
 	bio_endio(bio, 0);
-
-	return rc;
 }
 
 /**
@@ -203,7 +199,7 @@ static int axon_ram_probe(struct platform_device *device)
 		goto failed;
 	}
 
-	bank->size = resource.end - resource.start + 1;
+	bank->size = resource_size(&resource);
 
 	if (bank->size == 0) {
 		dev_err(&device->dev, "No DDR2 memory found for %s%d\n",

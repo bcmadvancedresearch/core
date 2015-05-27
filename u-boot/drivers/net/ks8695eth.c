@@ -3,19 +3,7 @@
  *
  * (C) Copyright 2004-2005, Greg Ungerer <greg.ungerer@opengear.com>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 /****************************************************************************/
@@ -99,7 +87,7 @@ void ks8695_getmac(void)
 
 /****************************************************************************/
 
-void eth_reset(bd_t *bd)
+static int ks8695_eth_init(struct eth_device *dev, bd_t *bd)
 {
 	int i;
 
@@ -151,21 +139,12 @@ void eth_reset(bd_t *bd)
 	ks8695_write(KS8695_LAN_DMA_RX_START, 0x1);
 
 	printf("KS8695 ETHERNET: %pM\n", eth_mac);
-}
-
-/****************************************************************************/
-
-int eth_init(bd_t *bd)
-{
-	debug ("%s(%d): eth_init()\n", __FILE__, __LINE__);
-
-	eth_reset(bd);
 	return 0;
 }
 
 /****************************************************************************/
 
-void eth_halt(void)
+static void ks8695_eth_halt(struct eth_device *dev)
 {
 	debug ("%s(%d): eth_halt()\n", __FILE__, __LINE__);
 
@@ -176,7 +155,7 @@ void eth_halt(void)
 
 /****************************************************************************/
 
-int eth_rx(void)
+static int ks8695_eth_recv(struct eth_device *dev)
 {
 	volatile struct ks8695_rxdesc *dp;
 	int i, len = 0;
@@ -199,12 +178,12 @@ int eth_rx(void)
 
 /****************************************************************************/
 
-int eth_send(volatile void *packet, int len)
+static int ks8695_eth_send(struct eth_device *dev, void *packet, int len)
 {
 	volatile struct ks8695_txdesc *dp;
 	static int next = 0;
 
-	debug ("%s(%d): eth_send(packet=%x,len=%d)\n", __FILE__, __LINE__,
+	debug ("%s(%d): eth_send(packet=%p,len=%d)\n", __FILE__, __LINE__,
 		packet, len);
 
 	dp = &ks8695_tx[next];
@@ -224,5 +203,27 @@ int eth_send(volatile void *packet, int len)
 	if (++next >= TXDESCS)
 		next = 0;
 
-	return len;
+	return 0;
+}
+
+/****************************************************************************/
+
+int ks8695_eth_initialize(void)
+{
+	struct eth_device *dev;
+
+	dev = malloc(sizeof(*dev));
+	if (dev == NULL)
+		return -1;
+	memset(dev, 0, sizeof(*dev));
+
+	dev->iobase = KS8695_IO_BASE + KS8695_LAN_DMA_TX;
+	dev->init = ks8695_eth_init;
+	dev->halt = ks8695_eth_halt;
+	dev->send = ks8695_eth_send;
+	dev->recv = ks8695_eth_recv;
+	strcpy(dev->name, "ks8695eth");
+
+	eth_register(dev);
+	return 0;
 }

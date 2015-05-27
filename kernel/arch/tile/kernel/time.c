@@ -23,8 +23,10 @@
 #include <linux/smp.h>
 #include <linux/delay.h>
 #include <linux/module.h>
+#include <linux/timekeeper_internal.h>
 #include <asm/irq_regs.h>
 #include <asm/traps.h>
+#include <asm/vdso.h>
 #include <hv/hypervisor.h>
 #include <arch/interrupts.h>
 #include <arch/spr_def.h>
@@ -78,7 +80,6 @@ static struct clocksource cycle_counter_cs = {
 	.rating = 300,
 	.read = clocksource_get_cycles,
 	.mask = CLOCKSOURCE_MASK(64),
-	.shift = 22,   /* typical value, e.g. x86 tsc uses this */
 	.flags = CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
@@ -91,8 +92,6 @@ void __init setup_clock(void)
 	cycles_per_sec = hv_sysconf(HV_SYSCONF_CPU_SPEED);
 	sched_clock_mult =
 		clocksource_hz2mult(cycles_per_sec, SCHED_CLOCK_SHIFT);
-	cycle_counter_cs.mult =
-		clocksource_hz2mult(cycles_per_sec, cycle_counter_cs.shift);
 }
 
 void __init calibrate_delay(void)
@@ -107,12 +106,11 @@ void __init calibrate_delay(void)
 void __init time_init(void)
 {
 	/* Initialize and register the clock source. */
-	clocksource_register(&cycle_counter_cs);
+	clocksource_register_hz(&cycle_counter_cs, cycles_per_sec);
 
 	/* Start up the tile-timer interrupt source on the boot cpu. */
 	setup_tile_timer();
 }
-
 
 /*
  * Define the tile timer clock event device.  The timer is driven by
@@ -162,7 +160,7 @@ static DEFINE_PER_CPU(struct clock_event_device, tile_timer) = {
 	.set_mode = tile_timer_set_mode,
 };
 
-void __cpuinit setup_tile_timer(void)
+void setup_tile_timer(void)
 {
 	struct clock_event_device *evt = &__get_cpu_var(tile_timer);
 
@@ -233,6 +231,44 @@ int setup_profiling_timer(unsigned int multiplier)
  */
 cycles_t ns2cycles(unsigned long nsecs)
 {
-	struct clock_event_device *dev = &__get_cpu_var(tile_timer);
+	/*
+	 * We do not have to disable preemption here as each core has the same
+	 * clock frequency.
+	 */
+	struct clock_event_device *dev = &__raw_get_cpu_var(tile_timer);
 	return ((u64)nsecs * dev->mult) >> dev->shift;
+}
+
+void update_vsyscall_tz(void)
+{
+	/* Userspace gettimeofday will spin while this value is odd. */
+	++vdso_data->tz_update_count;
+	smp_wmb();
+	vdso_data->tz_minuteswest = sys_tz.tz_minuteswest;
+	vdso_data->tz_dsttime = sys_tz.tz_dsttime;
+	smp_wmb();
+	++vdso_data->tz_update_count;
+}
+
+void update_vsyscall(struct timekeeper *tk)
+{
+	struct timespec wall_time = tk_xtime(tk);
+	struct timespec *wtm = &tk->wall_to_monotonic;
+	struct clocksource *clock = tk->clock;
+
+	if (clock != &cycle_counter_cs)
+		return;
+
+	/* Userspace gettimeofday will spin while this value is odd. */
+	++vdso_data->tb_update_count;
+	smp_wmb();
+	vdso_data->xtime_tod_stamp = clock->cycle_last;
+	vdso_data->xtime_clock_sec = wall_time.tv_sec;
+	vdso_data->xtime_clock_nsec = wall_time.tv_nsec;
+	vdso_data->wtom_clock_sec = wtm->tv_sec;
+	vdso_data->wtom_clock_nsec = wtm->tv_nsec;
+	vdso_data->mult = clock->mult;
+	vdso_data->shift = clock->shift;
+	smp_wmb();
+	++vdso_data->tb_update_count;
 }

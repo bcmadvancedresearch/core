@@ -463,8 +463,12 @@ static inline ino_t parent_ino(struct dentry *dentry)
 #define UBIFS_VERSION 1
 
 /* Normal UBIFS messages */
+#ifdef CONFIG_UBIFS_SILENCE_MSG
+#define ubifs_msg(fmt, ...)
+#else
 #define ubifs_msg(fmt, ...) \
 		printk(KERN_NOTICE "UBIFS: " fmt "\n", ##__VA_ARGS__)
+#endif
 /* UBIFS error messages */
 #define ubifs_err(fmt, ...)                                                  \
 	printk(KERN_ERR "UBIFS error (pid %d): %s: " fmt "\n", 0, \
@@ -2133,6 +2137,13 @@ void ubifs_compress(const void *in_buf, int in_len, void *out_buf, int *out_len,
 int ubifs_decompress(const void *buf, int len, void *out, int *out_len,
 		     int compr_type);
 
+/* these are used in cmd_ubifs.c */
+int ubifs_init(void);
+int ubifs_mount(char *vol_name);
+void ubifs_umount(struct ubifs_info *c);
+int ubifs_ls(char *dir_name);
+int ubifs_load(char *filename, u32 addr, u32 size);
+
 #include "debug.h"
 #include "misc.h"
 #include "key.h"
@@ -2140,7 +2151,4 @@ int ubifs_decompress(const void *buf, int len, void *out, int *out_len,
 /* todo: Move these to a common U-Boot header */
 int lzo1x_decompress_safe(const unsigned char *in, size_t in_len,
 			  unsigned char *out, size_t *out_len);
-
-int zunzip(void *dst, int dstlen, unsigned char *src, unsigned long *lenp,
-						int stoponerr, int offset);
 #endif /* !__UBIFS_H__ */

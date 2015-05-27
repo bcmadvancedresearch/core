@@ -4,48 +4,19 @@
  * (C) Copyright 2010
  * Stefano Babic, DENX Software Engineering, sbabic@denx.de
  *
- * Linux IPU driver:
+ * Linux IPU driver for MX51:
  *
- * (C) Copyright 2005-2011 Freescale Semiconductor, Inc.
+ * (C) Copyright 2005-2014 Freescale Semiconductor, Inc.
  *
- * See file CREDITS for list of people who contributed to this
- * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 #ifndef __IPU_REGS_INCLUDED__
 #define __IPU_REGS_INCLUDED__
 
-/*
- * hw_rev 2: IPUV3DEX
- * hw_rev 3: IPUV3M
- * hw_rev 4: IPUV3H
- */
-extern int g_ipu_hw_rev;
-
 #define IPU_DISP0_BASE		0x00000000
 #define IPU_MCU_T_DEFAULT	8
-#define IPU_DISP1_BASE		({g_ipu_hw_rev < 4 ? \
-				(IPU_MCU_T_DEFAULT << 25) : \
-				(0x00000000); })
-#define IPUV3DEX_REG_BASE	0x1E000000
-#define IPUV3M_REG_BASE		0x1E000000
-#define IPUV3H_REG_BASE		0x00200000
-
+#define IPU_DISP1_BASE		(IPU_MCU_T_DEFAULT << 25)
 #define IPU_CM_REG_BASE		0x00000000
 #define IPU_STAT_REG_BASE	0x00000200
 #define IPU_IDMAC_REG_BASE	0x00008000
@@ -60,30 +31,24 @@ extern int g_ipu_hw_rev;
 #define IPU_SMFC_REG_BASE	0x00050000
 #define IPU_DC_REG_BASE		0x00058000
 #define IPU_DMFC_REG_BASE	0x00060000
-#define IPU_VDI_REG_BASE	0x00068000
-#define IPU_CPMEM_REG_BASE		({g_ipu_hw_rev >= 4 ? \
-				   (0x00100000) : \
-				   (0x01000000); })
-#define IPU_LUT_REG_BASE		({g_ipu_hw_rev >= 4 ? \
-				   (0x00120000) : \
-				   (0x01020000); })
+#define IPU_VDI_REG_BASE	0x00680000
+#if defined(CONFIG_MX51) || defined(CONFIG_MX53)
+#define IPU_CPMEM_REG_BASE	0x01000000
+#define IPU_LUT_REG_BASE	0x01020000
+#define IPU_SRM_REG_BASE	0x01040000
+#define IPU_TPM_REG_BASE	0x01060000
+#define IPU_DC_TMPL_REG_BASE	0x01080000
+#define IPU_ISP_TBPR_REG_BASE	0x010C0000
+#elif defined(CONFIG_MX6)
+#define IPU_CPMEM_REG_BASE	0x00100000
+#define IPU_LUT_REG_BASE	0x00120000
+#define IPU_SRM_REG_BASE	0x00140000
+#define IPU_TPM_REG_BASE	0x00160000
+#define IPU_DC_TMPL_REG_BASE	0x00180000
+#define IPU_ISP_TBPR_REG_BASE	0x001C0000
+#endif
 
-#define IPU_SRM_REG_BASE		({g_ipu_hw_rev >= 4 ? \
-				   (0x00140000) : \
-				   (0x01040000); })
-#define IPU_TPM_REG_BASE		({g_ipu_hw_rev >= 4 ? \
-				   (0x00160000) : \
-				   (0x01060000); })
-#define IPU_DC_TMPL_REG_BASE	({g_ipu_hw_rev >= 4 ? \
-				   (0x00180000) : \
-				   (0x01080000); })
-#define IPU_ISP_TBPR_REG_BASE	({g_ipu_hw_rev >= 4 ? \
-				   (0x001C0000) : \
-				   (0x010C0000); })
-
-#define IPU_DISP_REG_BASE_ADDR	({g_ipu_hw_rev >= 4 ? \
-					(IPU_CTRL_BASE_ADDR + IPUV3H_REG_BASE) : \
-					(IPU_CTRL_BASE_ADDR + IPUV3M_REG_BASE); })
+#define IPU_CTRL_BASE_ADDR	(IPU_SOC_BASE_ADDR + IPU_SOC_OFFSET)
 
 extern u32 *ipu_dc_tmpl_reg;
 
@@ -206,7 +171,7 @@ struct ipu_cm {
 	u32 gpr;
 	u32 reserved0[26];
 	u32 ch_db_mode_sel[2];
-	u32 reserved1[16];
+	u32 reserved1[4];
 	u32 alt_ch_db_mode_sel[2];
 	u32 reserved2[2];
 	u32 ch_trb_mode_sel[2];
@@ -223,7 +188,7 @@ struct ipu_idmac {
 	u32 sub_addr[5];
 	u32 bndm_en[2];
 	u32 sc_cord[2];
-	u32 reserved[45];
+	u32 reserved[44];
 	u32 ch_busy[2];
 };
 
@@ -332,7 +297,7 @@ struct ipu_dmfc {
 	u32 stat;
 };
 
-#define IPU_CM_REG		((struct ipu_cm *)(IPU_DISP_REG_BASE_ADDR + \
+#define IPU_CM_REG		((struct ipu_cm *)(IPU_CTRL_BASE_ADDR + \
 				IPU_CM_REG_BASE))
 #define IPU_CONF		(&IPU_CM_REG->conf)
 #define IPU_SRM_PRI1		(&IPU_CM_REG->srm_pri1)
@@ -343,26 +308,27 @@ struct ipu_dmfc {
 #define IPU_FS_DISP_FLOW1	(&IPU_CM_REG->fs_disp_flow[0])
 #define IPU_DISP_GEN		(&IPU_CM_REG->disp_gen)
 #define IPU_MEM_RST		(&IPU_CM_REG->mem_rst)
-#define IPU_PM                  (&IPU_CM_REG->pm)
 #define IPU_GPR			(&IPU_CM_REG->gpr)
 #define IPU_CHA_DB_MODE_SEL(ch)	(&IPU_CM_REG->ch_db_mode_sel[ch / 32])
 
-#define IPU_STAT		((struct ipu_stat *)(IPU_DISP_REG_BASE_ADDR + \
+#define IPU_STAT		((struct ipu_stat *)(IPU_CTRL_BASE_ADDR + \
 				IPU_STAT_REG_BASE))
+#define IPU_INT_STAT(n)		(&IPU_STAT->int_stat[(n) - 1])
 #define IPU_CHA_CUR_BUF(ch)	(&IPU_STAT->cur_buf[ch / 32])
 #define IPU_CHA_BUF0_RDY(ch)	(&IPU_STAT->ch_buf0_rdy[ch / 32])
 #define IPU_CHA_BUF1_RDY(ch)	(&IPU_STAT->ch_buf1_rdy[ch / 32])
+#define IPUIRQ_2_STATREG(irq)	(IPU_INT_STAT(1) + ((irq) / 32))
+#define IPUIRQ_2_MASK(irq)	(1UL << ((irq) & 0x1F))
 
 #define IPU_INT_CTRL(n)		(&IPU_CM_REG->int_ctrl[(n) - 1])
 
-#define IDMAC_REG		((struct ipu_idmac *)(IPU_DISP_REG_BASE_ADDR + \
+#define IDMAC_REG		((struct ipu_idmac *)(IPU_CTRL_BASE_ADDR + \
 				IPU_IDMAC_REG_BASE))
 #define IDMAC_CONF		(&IDMAC_REG->conf)
 #define IDMAC_CHA_EN(ch)	(&IDMAC_REG->ch_en[ch / 32])
 #define IDMAC_CHA_PRI(ch)	(&IDMAC_REG->ch_pri[ch / 32])
-#define IDMAC_WM_EN(ch)		(&IDMAC_REG->wm_en[ch / 32])
 
-#define DI_REG(di)		((struct ipu_di *)(IPU_DISP_REG_BASE_ADDR + \
+#define DI_REG(di)		((struct ipu_di *)(IPU_CTRL_BASE_ADDR + \
 				((di == 1) ? IPU_DI1_REG_BASE : \
 				IPU_DI0_REG_BASE)))
 #define DI_GENERAL(di)		(&DI_REG(di)->general)
@@ -378,7 +344,7 @@ struct ipu_dmfc {
 #define DI_POL(di)		(&DI_REG(di)->pol)
 #define DI_SCR_CONF(di)		(&DI_REG(di)->scr_conf)
 
-#define DMFC_REG		((struct ipu_dmfc *)(IPU_DISP_REG_BASE_ADDR + \
+#define DMFC_REG		((struct ipu_dmfc *)(IPU_CTRL_BASE_ADDR + \
 				IPU_DMFC_REG_BASE))
 #define DMFC_WR_CHAN		(&DMFC_REG->wr_chan)
 #define DMFC_WR_CHAN_DEF	(&DMFC_REG->wr_chan_def)
@@ -388,7 +354,7 @@ struct ipu_dmfc {
 #define DMFC_IC_CTRL		(&DMFC_REG->ic_ctrl)
 
 
-#define DC_REG			((struct ipu_dc *)(IPU_DISP_REG_BASE_ADDR + \
+#define DC_REG			((struct ipu_dc *)(IPU_CTRL_BASE_ADDR + \
 				IPU_DC_REG_BASE))
 #define DC_MAP_CONF_PTR(n)	(&DC_REG->dc_map_ptr[n / 2])
 #define DC_MAP_CONF_VAL(n)	(&DC_REG->dc_map_val[n / 2])
@@ -431,17 +397,17 @@ static inline struct ipu_dc_ch *dc_ch_offset(int ch)
 #define DP_ASYNC0 0x60
 #define DP_ASYNC1 0xBC
 
-#define DP_REG			((struct ipu_dp *)(IPU_DISP_REG_BASE_ADDR + \
+#define DP_REG			((struct ipu_dp *)(IPU_CTRL_BASE_ADDR + \
 				IPU_DP_REG_BASE))
-#define DP_COM_CONF(flow)	(&DP_REG->com_conf_sync)
-#define DP_GRAPH_WIND_CTRL(flow) (&DP_REG->graph_wind_ctrl_sync)
-#define DP_CSC_A_0(flow)	(&DP_REG->csca_sync[0])
-#define DP_CSC_A_1(flow)	(&DP_REG->csca_sync[1])
-#define DP_CSC_A_2(flow)	(&DP_REG->csca_sync[2])
-#define DP_CSC_A_3(flow)	(&DP_REG->csca_sync[3])
+#define DP_COM_CONF()		(&DP_REG->com_conf_sync)
+#define DP_GRAPH_WIND_CTRL()	(&DP_REG->graph_wind_ctrl_sync)
+#define DP_CSC_A_0()		(&DP_REG->csca_sync[0])
+#define DP_CSC_A_1()		(&DP_REG->csca_sync[1])
+#define DP_CSC_A_2()		(&DP_REG->csca_sync[2])
+#define DP_CSC_A_3()		(&DP_REG->csca_sync[3])
 
-#define DP_CSC_0(flow)		(&DP_REG->csc_sync[0])
-#define DP_CSC_1(flow)		(&DP_REG->csc_sync[1])
+#define DP_CSC_0()		(&DP_REG->csc_sync[0])
+#define DP_CSC_1()		(&DP_REG->csc_sync[1])
 
 /* DC template opcodes */
 #define WROD(lf)		(0x18 | (lf << 1))

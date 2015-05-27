@@ -195,7 +195,6 @@ struct afs_cell {
 	struct list_head	link;		/* main cell list link */
 	struct key		*anonymous_key;	/* anonymous user key for this cell */
 	struct list_head	proc_link;	/* /proc cell list link */
-	struct proc_dir_entry	*proc_dir;	/* /proc dir for this cell */
 #ifdef CONFIG_AFS_FSCACHE
 	struct fscache_cookie	*cache;		/* caching cookie */
 #endif
@@ -627,7 +626,7 @@ extern void afs_clear_permits(struct afs_vnode *);
 extern void afs_cache_permit(struct afs_vnode *, struct key *, long);
 extern void afs_zap_permits(struct rcu_head *);
 extern struct key *afs_request_key(struct afs_cell *);
-extern int afs_permission(struct inode *, int, unsigned int);
+extern int afs_permission(struct inode *, int);
 
 /*
  * server.c
@@ -750,7 +749,7 @@ extern void afs_pages_written_back(struct afs_vnode *, struct afs_call *);
 extern ssize_t afs_file_write(struct kiocb *, const struct iovec *,
 			      unsigned long, loff_t);
 extern int afs_writeback_all(struct afs_vnode *);
-extern int afs_fsync(struct file *, int);
+extern int afs_fsync(struct file *, loff_t, loff_t, int);
 
 
 /*****************************************************************************/

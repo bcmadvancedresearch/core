@@ -33,7 +33,8 @@
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
-#include "drmP.h"
+#include <linux/export.h>
+#include <drm/drmP.h>
 
 #if defined(CONFIG_DEBUG_FS)
 
@@ -41,11 +42,10 @@
  * Initialization, etc.
  **************************************************/
 
-static struct drm_info_list drm_debugfs_list[] = {
+static const struct drm_info_list drm_debugfs_list[] = {
 	{"name", drm_name_info, 0},
 	{"vm", drm_vm_info, 0},
 	{"clients", drm_clients_info, 0},
-	{"queues", drm_queues_info, 0},
 	{"bufs", drm_bufs_info, 0},
 	{"gem_names", drm_gem_name_info, DRIVER_GEM},
 #if DRM_DEBUG_CODE
@@ -84,13 +84,12 @@ static const struct file_operations drm_debugfs_fops = {
  * Create a given set of debugfs files represented by an array of
  * gdm_debugfs_lists in the given root directory.
  */
-int drm_debugfs_create_files(struct drm_info_list *files, int count,
+int drm_debugfs_create_files(const struct drm_info_list *files, int count,
 			     struct dentry *root, struct drm_minor *minor)
 {
 	struct drm_device *dev = minor->dev;
 	struct dentry *ent;
 	struct drm_info_node *tmp;
-	char name[64];
 	int i, ret;
 
 	for (i = 0; i < count; i++) {
@@ -109,7 +108,7 @@ int drm_debugfs_create_files(struct drm_info_list *files, int count,
 					  root, tmp, &drm_debugfs_fops);
 		if (!ent) {
 			DRM_ERROR("Cannot create /sys/kernel/debug/dri/%s/%s\n",
-				  name, files[i].name);
+				  root->d_name.name, files[i].name);
 			kfree(tmp);
 			ret = -1;
 			goto fail;
@@ -118,7 +117,10 @@ int drm_debugfs_create_files(struct drm_info_list *files, int count,
 		tmp->minor = minor;
 		tmp->dent = ent;
 		tmp->info_ent = &files[i];
-		list_add(&(tmp->list), &(minor->debugfs_nodes.list));
+
+		mutex_lock(&minor->debugfs_lock);
+		list_add(&tmp->list, &minor->debugfs_list);
+		mutex_unlock(&minor->debugfs_lock);
 	}
 	return 0;
 
@@ -146,7 +148,8 @@ int drm_debugfs_init(struct drm_minor *minor, int minor_id,
 	char name[64];
 	int ret;
 
-	INIT_LIST_HEAD(&minor->debugfs_nodes.list);
+	INIT_LIST_HEAD(&minor->debugfs_list);
+	mutex_init(&minor->debugfs_lock);
 	sprintf(name, "%d", minor_id);
 	minor->debugfs_root = debugfs_create_dir(name, root);
 	if (!minor->debugfs_root) {
@@ -185,15 +188,16 @@ int drm_debugfs_init(struct drm_minor *minor, int minor_id,
  *
  * Remove all debugfs entries created by debugfs_init().
  */
-int drm_debugfs_remove_files(struct drm_info_list *files, int count,
+int drm_debugfs_remove_files(const struct drm_info_list *files, int count,
 			     struct drm_minor *minor)
 {
 	struct list_head *pos, *q;
 	struct drm_info_node *tmp;
 	int i;
 
+	mutex_lock(&minor->debugfs_lock);
 	for (i = 0; i < count; i++) {
-		list_for_each_safe(pos, q, &minor->debugfs_nodes.list) {
+		list_for_each_safe(pos, q, &minor->debugfs_list) {
 			tmp = list_entry(pos, struct drm_info_node, list);
 			if (tmp->info_ent == &files[i]) {
 				debugfs_remove(tmp->dent);
@@ -202,6 +206,7 @@ int drm_debugfs_remove_files(struct drm_info_list *files, int count,
 			}
 		}
 	}
+	mutex_unlock(&minor->debugfs_lock);
 	return 0;
 }
 EXPORT_SYMBOL(drm_debugfs_remove_files);

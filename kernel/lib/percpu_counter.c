@@ -10,8 +10,10 @@
 #include <linux/module.h>
 #include <linux/debugobjects.h>
 
+#ifdef CONFIG_HOTPLUG_CPU
 static LIST_HEAD(percpu_counters);
-static DEFINE_MUTEX(percpu_counters_lock);
+static DEFINE_SPINLOCK(percpu_counters_lock);
+#endif
 
 #ifdef CONFIG_DEBUG_OBJECTS_PERCPU_COUNTER
 
@@ -58,14 +60,15 @@ static inline void debug_percpu_counter_deactivate(struct percpu_counter *fbc)
 void percpu_counter_set(struct percpu_counter *fbc, s64 amount)
 {
 	int cpu;
+	unsigned long flags;
 
-	spin_lock(&fbc->lock);
+	raw_spin_lock_irqsave(&fbc->lock, flags);
 	for_each_possible_cpu(cpu) {
 		s32 *pcount = per_cpu_ptr(fbc->counters, cpu);
 		*pcount = 0;
 	}
 	fbc->count = amount;
-	spin_unlock(&fbc->lock);
+	raw_spin_unlock_irqrestore(&fbc->lock, flags);
 }
 EXPORT_SYMBOL(percpu_counter_set);
 
@@ -76,12 +79,13 @@ void __percpu_counter_add(struct percpu_counter *fbc, s64 amount, s32 batch)
 	preempt_disable();
 	count = __this_cpu_read(*fbc->counters) + amount;
 	if (count >= batch || count <= -batch) {
-		spin_lock(&fbc->lock);
+		unsigned long flags;
+		raw_spin_lock_irqsave(&fbc->lock, flags);
 		fbc->count += count;
-		__this_cpu_write(*fbc->counters, 0);
-		spin_unlock(&fbc->lock);
+		__this_cpu_sub(*fbc->counters, count - amount);
+		raw_spin_unlock_irqrestore(&fbc->lock, flags);
 	} else {
-		__this_cpu_write(*fbc->counters, count);
+		this_cpu_add(*fbc->counters, amount);
 	}
 	preempt_enable();
 }
@@ -95,14 +99,15 @@ s64 __percpu_counter_sum(struct percpu_counter *fbc)
 {
 	s64 ret;
 	int cpu;
+	unsigned long flags;
 
-	spin_lock(&fbc->lock);
+	raw_spin_lock_irqsave(&fbc->lock, flags);
 	ret = fbc->count;
 	for_each_online_cpu(cpu) {
 		s32 *pcount = per_cpu_ptr(fbc->counters, cpu);
 		ret += *pcount;
 	}
-	spin_unlock(&fbc->lock);
+	raw_spin_unlock_irqrestore(&fbc->lock, flags);
 	return ret;
 }
 EXPORT_SYMBOL(__percpu_counter_sum);
@@ -110,7 +115,7 @@ EXPORT_SYMBOL(__percpu_counter_sum);
 int __percpu_counter_init(struct percpu_counter *fbc, s64 amount,
 			  struct lock_class_key *key)
 {
-	spin_lock_init(&fbc->lock);
+	raw_spin_lock_init(&fbc->lock);
 	lockdep_set_class(&fbc->lock, key);
 	fbc->count = amount;
 	fbc->counters = alloc_percpu(s32);
@@ -121,9 +126,9 @@ int __percpu_counter_init(struct percpu_counter *fbc, s64 amount,
 
 #ifdef CONFIG_HOTPLUG_CPU
 	INIT_LIST_HEAD(&fbc->list);
-	mutex_lock(&percpu_counters_lock);
+	spin_lock(&percpu_counters_lock);
 	list_add(&fbc->list, &percpu_counters);
-	mutex_unlock(&percpu_counters_lock);
+	spin_unlock(&percpu_counters_lock);
 #endif
 	return 0;
 }
@@ -137,9 +142,9 @@ void percpu_counter_destroy(struct percpu_counter *fbc)
 	debug_percpu_counter_deactivate(fbc);
 
 #ifdef CONFIG_HOTPLUG_CPU
-	mutex_lock(&percpu_counters_lock);
+	spin_lock(&percpu_counters_lock);
 	list_del(&fbc->list);
-	mutex_unlock(&percpu_counters_lock);
+	spin_unlock(&percpu_counters_lock);
 #endif
 	free_percpu(fbc->counters);
 	fbc->counters = NULL;
@@ -156,7 +161,7 @@ static void compute_batch_value(void)
 	percpu_counter_batch = max(32, nr*2);
 }
 
-static int __cpuinit percpu_counter_hotcpu_callback(struct notifier_block *nb,
+static int percpu_counter_hotcpu_callback(struct notifier_block *nb,
 					unsigned long action, void *hcpu)
 {
 #ifdef CONFIG_HOTPLUG_CPU
@@ -164,22 +169,22 @@ static int __cpuinit percpu_counter_hotcpu_callback(struct notifier_block *nb,
 	struct percpu_counter *fbc;
 
 	compute_batch_value();
-	if (action != CPU_DEAD)
+	if (action != CPU_DEAD && action != CPU_DEAD_FROZEN)
 		return NOTIFY_OK;
 
 	cpu = (unsigned long)hcpu;
-	mutex_lock(&percpu_counters_lock);
+	spin_lock(&percpu_counters_lock);
 	list_for_each_entry(fbc, &percpu_counters, list) {
 		s32 *pcount;
 		unsigned long flags;
 
-		spin_lock_irqsave(&fbc->lock, flags);
+		raw_spin_lock_irqsave(&fbc->lock, flags);
 		pcount = per_cpu_ptr(fbc->counters, cpu);
 		fbc->count += *pcount;
 		*pcount = 0;
-		spin_unlock_irqrestore(&fbc->lock, flags);
+		raw_spin_unlock_irqrestore(&fbc->lock, flags);
 	}
-	mutex_unlock(&percpu_counters_lock);
+	spin_unlock(&percpu_counters_lock);
 #endif
 	return NOTIFY_OK;
 }

@@ -19,8 +19,7 @@
 #endif
 
 #include <arch/bitops.h>
-#include <asm/system.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 #include <linux/compiler.h>
 
 /*
@@ -145,7 +144,7 @@ static inline int test_and_change_bit(int nr, volatile unsigned long *addr)
  * definition, which doesn't have the same semantics.  We don't want to
  * use -fno-builtin, so just hide the name ffs.
  */
-#define ffs kernel_ffs
+#define ffs(x) kernel_ffs(x)
 
 #include <asm-generic/bitops/fls.h>
 #include <asm-generic/bitops/__fls.h>
@@ -156,8 +155,7 @@ static inline int test_and_change_bit(int nr, volatile unsigned long *addr)
 
 #include <asm-generic/bitops/le.h>
 
-#define ext2_set_bit_atomic(l,n,a)   test_and_set_bit(n,a)
-#define ext2_clear_bit_atomic(l,n,a) test_and_clear_bit(n,a)
+#include <asm-generic/bitops/ext2-atomic-setbit.h>
 
 #include <asm-generic/bitops/sched.h>
 

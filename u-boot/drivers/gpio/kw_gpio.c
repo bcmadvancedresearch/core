@@ -3,9 +3,7 @@
  *
  * Marvell Orion SoC GPIO handling.
  *
- * This file is licensed under the terms of the GNU General Public
- * License version 2.  This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 /*
@@ -17,6 +15,7 @@
 
 #include <common.h>
 #include <asm/bitops.h>
+#include <asm/io.h>
 #include <asm/arch/kirkwood.h>
 #include <asm/arch/gpio.h>
 
@@ -95,7 +94,7 @@ void kw_gpio_set_valid(unsigned pin, int mode)
  */
 int kw_gpio_direction_input(unsigned pin)
 {
-	if (!kw_gpio_is_valid(pin, GPIO_INPUT_OK))
+	if (kw_gpio_is_valid(pin, GPIO_INPUT_OK) != 0)
 		return 1;
 
 	/* Configure GPIO direction. */

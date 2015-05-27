@@ -142,10 +142,14 @@ extern unsigned long mmu_mapin_ram(unsigned long top);
 
 #elif defined(CONFIG_PPC_FSL_BOOK3E)
 extern unsigned long map_mem_in_cams(unsigned long ram, int max_cam_idx);
+extern unsigned long calc_cam_sz(unsigned long ram, unsigned long virt,
+				 phys_addr_t phys);
 #ifdef CONFIG_PPC32
 extern void MMU_init_hw(void);
 extern unsigned long mmu_mapin_ram(unsigned long top);
 extern void adjust_total_lowmem(void);
+extern int switch_to_as1(void);
+extern void restore_to_as0(int esel, int offset, void *dt_ptr, int bootcpu);
 #endif
 extern void loadcam_entry(unsigned int index);
 

@@ -433,12 +433,12 @@
 #include <linux/types.h>
 
 /*
- * bfin pint registers layout
+ * gpio pint registers layout
  */
 struct bfin_pint_regs {
 	u32 mask_set;
 	u32 mask_clear;
-	u32 irq;
+	u32 request;
 	u32 assign;
 	u32 edge_set;
 	u32 edge_clear;

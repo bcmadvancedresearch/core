@@ -18,6 +18,7 @@
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
+#include <linux/export.h>
 #include "emu10k1_synth_local.h"
 #include <sound/asoundef.h>
 
@@ -84,6 +85,8 @@ snd_emu10k1_ops_setup(struct snd_emux *emux)
  * get more voice for pcm
  *
  * terminate most inactive voice and give it as a pcm voice.
+ *
+ * voice_lock is already held.
  */
 int
 snd_emu10k1_synth_get_voice(struct snd_emu10k1 *hw)
@@ -91,12 +94,10 @@ snd_emu10k1_synth_get_voice(struct snd_emu10k1 *hw)
 	struct snd_emux *emu;
 	struct snd_emux_voice *vp;
 	struct best_voice best[V_END];
-	unsigned long flags;
 	int i;
 
 	emu = hw->synth;
 
-	spin_lock_irqsave(&emu->voice_lock, flags);
 	lookup_voices(emu, hw, best, 1); /* no OFF voices */
 	for (i = 0; i < V_END; i++) {
 		if (best[i].voice >= 0) {
@@ -112,11 +113,9 @@ snd_emu10k1_synth_get_voice(struct snd_emu10k1 *hw)
 			vp->emu->num_voices--;
 			vp->ch = -1;
 			vp->state = SNDRV_EMUX_ST_OFF;
-			spin_unlock_irqrestore(&emu->voice_lock, flags);
 			return ch;
 		}
 	}
-	spin_unlock_irqrestore(&emu->voice_lock, flags);
 
 	/* not found */
 	return -ENOMEM;
@@ -227,7 +226,7 @@ lookup_voices(struct snd_emux *emu, struct snd_emu10k1 *hw,
 	int  i;
 
 	for (i = 0; i < V_END; i++) {
-		best[i].time = (unsigned int)-1; /* XXX MAX_?INT really */;
+		best[i].time = (unsigned int)-1; /* XXX MAX_?INT really */
 		best[i].voice = -1;
 	}
 

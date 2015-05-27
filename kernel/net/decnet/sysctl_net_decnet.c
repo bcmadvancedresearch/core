@@ -68,14 +68,15 @@ static struct ctl_table_header *dn_table_header = NULL;
 static void strip_it(char *str)
 {
 	for(;;) {
-		switch(*str) {
-			case ' ':
-			case '\n':
-			case '\r':
-			case ':':
-				*str = 0;
-			case 0:
-				return;
+		switch (*str) {
+		case ' ':
+		case '\n':
+		case '\r':
+		case ':':
+			*str = 0;
+			/* Fallthrough */
+		case 0:
+			return;
 		}
 		str++;
 	}
@@ -131,7 +132,7 @@ static int parse_addr(__le16 *addr, char *str)
 	return 0;
 }
 
-static int dn_node_address_handler(ctl_table *table, int write,
+static int dn_node_address_handler(struct ctl_table *table, int write,
 				void __user *buffer,
 				size_t *lenp, loff_t *ppos)
 {
@@ -182,7 +183,7 @@ static int dn_node_address_handler(ctl_table *table, int write,
 	return 0;
 }
 
-static int dn_def_dev_handler(ctl_table *table, int write,
+static int dn_def_dev_handler(struct ctl_table *table, int write,
 				void __user *buffer,
 				size_t *lenp, loff_t *ppos)
 {
@@ -245,7 +246,7 @@ static int dn_def_dev_handler(ctl_table *table, int write,
 	return 0;
 }
 
-static ctl_table dn_table[] = {
+static struct ctl_table dn_table[] = {
 	{
 		.procname = "node_address",
 		.maxlen = 7,
@@ -350,20 +351,14 @@ static ctl_table dn_table[] = {
 	{ }
 };
 
-static struct ctl_path dn_path[] = {
-	{ .procname = "net", },
-	{ .procname = "decnet", },
-	{ }
-};
-
 void dn_register_sysctl(void)
 {
-	dn_table_header = register_sysctl_paths(dn_path, dn_table);
+	dn_table_header = register_net_sysctl(&init_net, "net/decnet", dn_table);
 }
 
 void dn_unregister_sysctl(void)
 {
-	unregister_sysctl_table(dn_table_header);
+	unregister_net_sysctl_table(dn_table_header);
 }
 
 #else  /* CONFIG_SYSCTL */

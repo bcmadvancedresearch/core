@@ -62,7 +62,7 @@ c) Image building procedure
 The following picture shows how the new uImage is prepared. Input consists of
 image source file (.its) and a set of data files. Image is created with the
 help of standard U-boot mkimage tool which in turn uses dtc (device tree
-compiler) to produce image tree blob (.itb).  Resulting .itb file is is the
+compiler) to produce image tree blob (.itb).  Resulting .itb file is the
 actual binary of a new uImage.
 
 
@@ -159,7 +159,7 @@ the '/images' node should have the following layout:
   - description : Textual description of the component sub-image
   - type : Name of component sub-image type, supported types are:
     "standalone", "kernel", "ramdisk", "firmware", "script", "filesystem",
-    "fdt".
+    "flat_dt".
   - data : Path to the external file which contains this node's binary data.
   - compression : Compression used by included data. Supported compressions
     are "gzip" and "bzip2". If no compression is used compression property
@@ -173,8 +173,7 @@ the '/images' node should have the following layout:
   - arch : Architecture name, mandatory for types: "standalone", "kernel",
     "firmware", "ramdisk" and "fdt". Valid architecture names are: "alpha",
     "arm", "i386", "ia64", "mips", "mips64", "ppc", "s390", "sh", "sparc",
-    "sparc64", "m68k", "nios", "microblaze", "nios2", "blackfin", "avr32",
-    "st200".
+    "sparc64", "m68k", "microblaze", "nios2", "blackfin", "avr32", "st200".
   - entry : entry point address, address size is determined by
     '#address-cells' property of the root node. Mandatory for for types:
     "standalone" and "kernel".

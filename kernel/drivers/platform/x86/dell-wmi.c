@@ -32,7 +32,6 @@
 #include <linux/types.h>
 #include <linux/input.h>
 #include <linux/input/sparse-keymap.h>
-#include <acpi/acpi_drivers.h>
 #include <linux/acpi.h>
 #include <linux/string.h>
 #include <linux/dmi.h>
@@ -54,6 +53,8 @@ MODULE_ALIAS("wmi:"DELL_EVENT_GUID);
  */
 
 static const struct key_entry dell_wmi_legacy_keymap[] __initconst = {
+	{ KE_IGNORE, 0x003a, { KEY_CAPSLOCK } },
+
 	{ KE_KEY, 0xe045, { KEY_PROG1 } },
 	{ KE_KEY, 0xe009, { KEY_EJECTCD } },
 
@@ -85,6 +86,11 @@ static const struct key_entry dell_wmi_legacy_keymap[] __initconst = {
 	{ KE_IGNORE, 0xe013, { KEY_RESERVED } },
 
 	{ KE_IGNORE, 0xe020, { KEY_MUTE } },
+
+	/* Shortcut and audio panel keys */
+	{ KE_IGNORE, 0xe025, { KEY_RESERVED } },
+	{ KE_IGNORE, 0xe026, { KEY_RESERVED } },
+
 	{ KE_IGNORE, 0xe02e, { KEY_VOLUMEDOWN } },
 	{ KE_IGNORE, 0xe030, { KEY_VOLUMEUP } },
 	{ KE_IGNORE, 0xe033, { KEY_KBDILLUMUP } },
@@ -92,6 +98,9 @@ static const struct key_entry dell_wmi_legacy_keymap[] __initconst = {
 	{ KE_IGNORE, 0xe03a, { KEY_CAPSLOCK } },
 	{ KE_IGNORE, 0xe045, { KEY_NUMLOCK } },
 	{ KE_IGNORE, 0xe046, { KEY_SCROLLLOCK } },
+	{ KE_IGNORE, 0xe0f7, { KEY_MUTE } },
+	{ KE_IGNORE, 0xe0f8, { KEY_VOLUMEDOWN } },
+	{ KE_IGNORE, 0xe0f9, { KEY_VOLUMEUP } },
 	{ KE_END, 0 }
 };
 
@@ -120,7 +129,8 @@ static const u16 bios_to_linux_keycode[256] __initconst = {
 	KEY_BRIGHTNESSUP,	KEY_UNKNOWN,	KEY_KBDILLUMTOGGLE,
 	KEY_UNKNOWN,	KEY_SWITCHVIDEOMODE,	KEY_UNKNOWN, KEY_UNKNOWN,
 	KEY_SWITCHVIDEOMODE,	KEY_UNKNOWN,	KEY_UNKNOWN, KEY_PROG2,
-	KEY_UNKNOWN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	KEY_UNKNOWN,	KEY_UNKNOWN,	KEY_UNKNOWN,	KEY_UNKNOWN,
+	KEY_UNKNOWN,	KEY_UNKNOWN,	KEY_UNKNOWN,	KEY_MICMUTE,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -129,8 +139,8 @@ static const u16 bios_to_linux_keycode[256] __initconst = {
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	KEY_PROG3
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, KEY_PROG3
 };
 
 static struct input_dev *dell_wmi_input_dev;
@@ -153,18 +163,24 @@ static void dell_wmi_notify(u32 value, void *context)
 		const struct key_entry *key;
 		int reported_key;
 		u16 *buffer_entry = (u16 *)obj->buffer.pointer;
+		int buffer_size = obj->buffer.length/2;
 
-		if (dell_new_hk_type && (buffer_entry[1] != 0x10)) {
+		if (buffer_size >= 2 && dell_new_hk_type && buffer_entry[1] != 0x10) {
 			pr_info("Received unknown WMI event (0x%x)\n",
 				buffer_entry[1]);
 			kfree(obj);
 			return;
 		}
 
-		if (dell_new_hk_type || buffer_entry[1] == 0x0)
+		if (buffer_size >= 3 && (dell_new_hk_type || buffer_entry[1] == 0x0))
 			reported_key = (int)buffer_entry[2];
-		else
+		else if (buffer_size >= 2)
 			reported_key = (int)buffer_entry[1] & 0xffff;
+		else {
+			pr_info("Received unknown WMI event\n");
+			kfree(obj);
+			return;
+		}
 
 		key = sparse_keymap_entry_from_scancode(dell_wmi_input_dev,
 							reported_key);

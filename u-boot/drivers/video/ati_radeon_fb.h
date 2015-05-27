@@ -49,8 +49,8 @@ struct radeonfb_info {
 	struct pci_device_id	pdev;
 	u16			family;
 
-	u32			fb_base_phys;
-	u32			mmio_base_phys;
+	u32			fb_base_bus;
+	u32			mmio_base_bus;
 
 	void			*mmio_base;
 	void			*fb_base;
@@ -92,7 +92,7 @@ static inline void radeon_engine_flush (struct radeonfb_info *rinfo)
 
 	/* initiate flush */
 	OUTREGP(RB2D_DSTCACHE_CTLSTAT, RB2D_DC_FLUSH_ALL,
-	        ~RB2D_DC_FLUSH_ALL);
+		~RB2D_DC_FLUSH_ALL);
 
 	for (i=0; i < 2000000; i++) {
 		if (!(INREG(RB2D_DSTCACHE_CTLSTAT) & RB2D_DC_BUSY))

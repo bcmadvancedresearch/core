@@ -4,7 +4,7 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/string.h>
 #include <linux/delay.h>
 #include <linux/sched.h>
@@ -714,7 +714,7 @@ int vio_ldc_alloc(struct vio_driver_state *vio,
 	cfg.tx_irq = vio->vdev->tx_irq;
 	cfg.rx_irq = vio->vdev->rx_irq;
 
-	lp = ldc_alloc(vio->vdev->channel_id, &cfg, event_arg);
+	lp = ldc_alloc(vio->vdev->channel_id, &cfg, event_arg, vio->name);
 	if (IS_ERR(lp))
 		return PTR_ERR(lp);
 
@@ -746,7 +746,7 @@ void vio_port_up(struct vio_driver_state *vio)
 
 	err = 0;
 	if (state == LDC_STATE_INIT) {
-		err = ldc_bind(vio->lp, vio->name);
+		err = ldc_bind(vio->lp);
 		if (err)
 			printk(KERN_WARNING "%s: Port %lu bind failed, "
 			       "err=%d\n",

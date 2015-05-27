@@ -28,7 +28,6 @@
 #ifndef __UWB_INTERNAL_H__
 #define __UWB_INTERNAL_H__
 
-#include <linux/version.h>
 #include <linux/kernel.h>
 #include <linux/device.h>
 #include <linux/uwb.h>
@@ -56,7 +55,8 @@ static inline struct uwb_rc *__uwb_rc_get(struct uwb_rc *rc)
 
 static inline void __uwb_rc_put(struct uwb_rc *rc)
 {
-	uwb_dev_put(&rc->uwb_dev);
+	if (rc)
+		uwb_dev_put(&rc->uwb_dev);
 }
 
 extern int uwb_rc_reset(struct uwb_rc *rc);

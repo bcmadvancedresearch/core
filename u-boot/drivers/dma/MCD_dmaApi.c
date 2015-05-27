@@ -1,23 +1,7 @@
 /*
  * Copyright (C) 2004-2007 Freescale Semiconductor, Inc.
  *
- * See file CREDITS for list of people who contributed to this
- * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 /*Main C file for multi-channel DMA API. */
@@ -486,7 +470,8 @@ int MCD_startDma(int channel, s8 * srcAddr, s16 srcIncr, s8 * destAddr,
 		    MCD_modelTaskTable[TASK_FECTX].TDTstart;
 		MCD_taskTable[channel].TDTend =
 		    MCD_modelTaskTable[TASK_FECTX].TDTend;
-		MCD_startDmaENetXmit(srcAddr, srcAddr, destAddr, MCD_taskTable,
+		MCD_startDmaENetXmit((char *)srcAddr, (char *)srcAddr,
+				     (char *)destAddr, MCD_taskTable,
 				     channel);
 	} else if (flags & MCD_FECRX_DMA) {
 		/* TDTStart and TDTEnd */
@@ -494,7 +479,8 @@ int MCD_startDma(int channel, s8 * srcAddr, s16 srcIncr, s8 * destAddr,
 		    MCD_modelTaskTable[TASK_FECRX].TDTstart;
 		MCD_taskTable[channel].TDTend =
 		    MCD_modelTaskTable[TASK_FECRX].TDTend;
-		MCD_startDmaENetRcv(srcAddr, srcAddr, destAddr, MCD_taskTable,
+		MCD_startDmaENetRcv((char *)srcAddr, (char *)srcAddr,
+				    (char *)destAddr, MCD_taskTable,
 				    channel);
 	} else if (flags & MCD_SINGLE_DMA) {
 		/* this buffer descriptor is used for storing off initial
@@ -532,8 +518,9 @@ int MCD_startDma(int channel, s8 * srcAddr, s16 srcIncr, s8 * destAddr,
 			    MCD_modelTaskTable[TASK_SINGLENOEU].TDTstart;
 			MCD_taskTable[channel].TDTend =
 			    MCD_modelTaskTable[TASK_SINGLENOEU].TDTend;
-			MCD_startDmaSingleNoEu(srcAddr, srcIncr, destAddr,
-					       destIncr, dmaSize, xferSizeIncr,
+			MCD_startDmaSingleNoEu((char *)srcAddr, srcIncr,
+					       (char *)destAddr, destIncr,
+					       (int)dmaSize, xferSizeIncr,
 					       flags, (int *)
 					       &(MCD_relocBuffDesc[channel]),
 					       cSave, MCD_taskTable, channel);
@@ -543,8 +530,9 @@ int MCD_startDma(int channel, s8 * srcAddr, s16 srcIncr, s8 * destAddr,
 			    MCD_modelTaskTable[TASK_SINGLEEU].TDTstart;
 			MCD_taskTable[channel].TDTend =
 			    MCD_modelTaskTable[TASK_SINGLEEU].TDTend;
-			MCD_startDmaSingleEu(srcAddr, srcIncr, destAddr,
-					     destIncr, dmaSize, xferSizeIncr,
+			MCD_startDmaSingleEu((char *)srcAddr, srcIncr,
+					     (char *)destAddr, destIncr,
+					     (int)dmaSize, xferSizeIncr,
 					     flags, (int *)
 					     &(MCD_relocBuffDesc[channel]),
 					     cSave, MCD_taskTable, channel);

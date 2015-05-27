@@ -3,23 +3,7 @@
  * Wolfgang Denk, DENX Software Engineering, wd@denx.de.
  * Keith Outwater, keith_outwater@mvis.com`
  *
- * See file CREDITS for list of people who contributed to this
- * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 /*
@@ -34,19 +18,10 @@
 
 #if defined(CONFIG_CMD_DATE)
 
-/*---------------------------------------------------------------------*/
-#undef DEBUG_RTC
-
-#ifdef DEBUG_RTC
-#define DEBUGR(fmt,args...) printf(fmt ,##args)
-#else
-#define DEBUGR(fmt,args...)
-#endif
-/*---------------------------------------------------------------------*/
-
 /*
  * RTC register addresses
  */
+#if defined CONFIG_RTC_DS1337
 #define RTC_SEC_REG_ADDR	0x0
 #define RTC_MIN_REG_ADDR	0x1
 #define RTC_HR_REG_ADDR		0x2
@@ -56,6 +31,19 @@
 #define RTC_YR_REG_ADDR		0x6
 #define RTC_CTL_REG_ADDR	0x0e
 #define RTC_STAT_REG_ADDR	0x0f
+#define RTC_TC_REG_ADDR		0x10
+#elif defined CONFIG_RTC_DS1388
+#define RTC_SEC_REG_ADDR	0x1
+#define RTC_MIN_REG_ADDR	0x2
+#define RTC_HR_REG_ADDR		0x3
+#define RTC_DAY_REG_ADDR	0x4
+#define RTC_DATE_REG_ADDR	0x5
+#define RTC_MON_REG_ADDR	0x6
+#define RTC_YR_REG_ADDR		0x7
+#define RTC_CTL_REG_ADDR	0x0c
+#define RTC_STAT_REG_ADDR	0x0b
+#define RTC_TC_REG_ADDR		0x0a
+#endif
 
 /*
  * RTC control register bits
@@ -77,9 +65,6 @@
 
 static uchar rtc_read (uchar reg);
 static void rtc_write (uchar reg, uchar val);
-static uchar bin2bcd (unsigned int n);
-static unsigned bcd2bin (uchar c);
-
 
 /*
  * Get the current time from the RTC
@@ -99,7 +84,12 @@ int rtc_get (struct rtc_time *tmp)
 	mon_cent = rtc_read (RTC_MON_REG_ADDR);
 	year = rtc_read (RTC_YR_REG_ADDR);
 
-	DEBUGR ("Get RTC year: %02x mon/cent: %02x mday: %02x wday: %02x "
+	/* No century bit, assume year 2000 */
+#ifdef CONFIG_RTC_DS1388
+	mon_cent |= 0x80;
+#endif
+
+	debug("Get RTC year: %02x mon/cent: %02x mday: %02x wday: %02x "
 		"hr: %02x min: %02x sec: %02x control: %02x status: %02x\n",
 		year, mon_cent, mday, wday, hour, min, sec, control, status);
 
@@ -121,7 +111,7 @@ int rtc_get (struct rtc_time *tmp)
 	tmp->tm_yday = 0;
 	tmp->tm_isdst= 0;
 
-	DEBUGR ("Get DATE: %4d-%02d-%02d (wday=%d)  TIME: %2d:%02d:%02d\n",
+	debug("Get DATE: %4d-%02d-%02d (wday=%d)  TIME: %2d:%02d:%02d\n",
 		tmp->tm_year, tmp->tm_mon, tmp->tm_mday, tmp->tm_wday,
 		tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
 
@@ -136,7 +126,7 @@ int rtc_set (struct rtc_time *tmp)
 {
 	uchar century;
 
-	DEBUGR ("Set DATE: %4d-%02d-%02d (wday=%d)  TIME: %2d:%02d:%02d\n",
+	debug("Set DATE: %4d-%02d-%02d (wday=%d)  TIME: %2d:%02d:%02d\n",
 		tmp->tm_year, tmp->tm_mon, tmp->tm_mday, tmp->tm_wday,
 		tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
 
@@ -163,6 +153,7 @@ int rtc_set (struct rtc_time *tmp)
  * 600 nA to 2uA. Define CONFIG_SYS_RTC_DS1337_NOOSC if you wish to turn
  * off the OSC output.
  */
+
 #ifdef CONFIG_SYS_RTC_DS1337_NOOSC
  #define RTC_DS1337_RESET_VAL \
 	(RTC_CTL_BIT_INTCN | RTC_CTL_BIT_RS1 | RTC_CTL_BIT_RS2)
@@ -171,7 +162,17 @@ int rtc_set (struct rtc_time *tmp)
 #endif
 void rtc_reset (void)
 {
+#ifdef CONFIG_SYS_RTC_DS1337
 	rtc_write (RTC_CTL_REG_ADDR, RTC_DS1337_RESET_VAL);
+#elif defined CONFIG_SYS_RTC_DS1388
+	rtc_write(RTC_CTL_REG_ADDR, 0x0); /* hw default */
+#endif
+#ifdef CONFIG_SYS_DS1339_TCR_VAL
+	rtc_write (RTC_TC_REG_ADDR, CONFIG_SYS_DS1339_TCR_VAL);
+#endif
+#ifdef CONFIG_SYS_DS1388_TCR_VAL
+	rtc_write(RTC_TC_REG_ADDR, CONFIG_SYS_DS1388_TCR_VAL);
+#endif
 }
 
 
@@ -189,16 +190,6 @@ uchar rtc_read (uchar reg)
 static void rtc_write (uchar reg, uchar val)
 {
 	i2c_reg_write (CONFIG_SYS_I2C_RTC_ADDR, reg, val);
-}
-
-static unsigned bcd2bin (uchar n)
-{
-	return ((((n >> 4) & 0x0F) * 10) + (n & 0x0F));
-}
-
-static unsigned char bin2bcd (unsigned int n)
-{
-	return (((n / 10) << 4) | (n % 10));
 }
 
 #endif

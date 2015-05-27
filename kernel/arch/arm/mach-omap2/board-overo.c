@@ -36,27 +36,28 @@
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
 #include <linux/mmc/host.h>
+#include <linux/usb/phy.h>
+
+#include <linux/platform_data/mtd-nand-omap2.h>
+#include <linux/platform_data/spi-omap2-mcspi.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/flash.h>
 #include <asm/mach/map.h>
 
-#include <plat/board.h>
-#include <plat/common.h>
 #include <video/omapdss.h>
-#include <video/omap-panel-generic-dpi.h>
-#include <plat/gpmc.h>
-#include <mach/hardware.h>
-#include <plat/nand.h>
-#include <plat/mcspi.h>
-#include <plat/mux.h>
-#include <plat/usb.h>
+#include <video/omap-panel-data.h>
 
+#include "common.h"
 #include "mux.h"
 #include "sdram-micron-mt46h32m32lf-6.h"
+#include "gpmc.h"
 #include "hsmmc.h"
+#include "board-flash.h"
 #include "common-board-devices.h"
+
+#define	NAND_CS			0
 
 #define OVERO_GPIO_BT_XGATE	15
 #define OVERO_GPIO_W2W_NRESET	16
@@ -67,22 +68,27 @@
 
 #define OVERO_SMSC911X_CS      5
 #define OVERO_SMSC911X_GPIO    176
+#define OVERO_SMSC911X_NRESET  64
 #define OVERO_SMSC911X2_CS     4
 #define OVERO_SMSC911X2_GPIO   65
+
+/* whether to register LCD35 instead of LCD43 */
+static bool overo_use_lcd35;
 
 #if defined(CONFIG_TOUCHSCREEN_ADS7846) || \
 	defined(CONFIG_TOUCHSCREEN_ADS7846_MODULE)
 
 /* fixed regulator for ads7846 */
-static struct regulator_consumer_supply ads7846_supply =
-	REGULATOR_SUPPLY("vcc", "spi1.0");
+static struct regulator_consumer_supply ads7846_supply[] = {
+	REGULATOR_SUPPLY("vcc", "spi1.0"),
+};
 
 static struct regulator_init_data vads7846_regulator = {
 	.constraints = {
 		.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
 	},
-	.num_consumer_supplies	= 1,
-	.consumer_supplies	= &ads7846_supply,
+	.num_consumer_supplies	= ARRAY_SIZE(ads7846_supply),
+	.consumer_supplies	= ads7846_supply,
 };
 
 static struct fixed_voltage_config vads7846 = {
@@ -114,13 +120,13 @@ static inline void __init overo_ads7846_init(void) { return; }
 #if defined(CONFIG_SMSC911X) || defined(CONFIG_SMSC911X_MODULE)
 
 #include <linux/smsc911x.h>
-#include <plat/gpmc-smsc911x.h>
+#include "gpmc-smsc911x.h"
 
 static struct omap_smsc911x_platform_data smsc911x_cfg = {
 	.id		= 0,
 	.cs             = OVERO_SMSC911X_CS,
 	.gpio_irq       = OVERO_SMSC911X_GPIO,
-	.gpio_reset     = -EINVAL,
+	.gpio_reset     = OVERO_SMSC911X_NRESET,
 	.flags		= SMSC911X_USE_32BIT,
 };
 
@@ -143,134 +149,96 @@ static inline void __init overo_init_smsc911x(void) { return; }
 #endif
 
 /* DSS */
-static int lcd_enabled;
-static int dvi_enabled;
-
 #define OVERO_GPIO_LCD_EN 144
 #define OVERO_GPIO_LCD_BL 145
 
-static struct gpio overo_dss_gpios[] __initdata = {
-	{ OVERO_GPIO_LCD_EN, GPIOF_OUT_INIT_HIGH, "OVERO_GPIO_LCD_EN" },
-	{ OVERO_GPIO_LCD_BL, GPIOF_OUT_INIT_HIGH, "OVERO_GPIO_LCD_BL" },
+static struct connector_atv_platform_data overo_tv_pdata = {
+	.name = "tv",
+	.source = "venc.0",
+	.connector_type = OMAP_DSS_VENC_TYPE_SVIDEO,
+	.invert_polarity = false,
+};
+
+static struct platform_device overo_tv_connector_device = {
+	.name                   = "connector-analog-tv",
+	.id                     = 0,
+	.dev.platform_data      = &overo_tv_pdata,
+};
+
+static const struct display_timing overo_lcd43_videomode = {
+	.pixelclock	= { 0, 9200000, 0 },
+
+	.hactive = { 0, 480, 0 },
+	.hfront_porch = { 0, 8, 0 },
+	.hback_porch = { 0, 4, 0 },
+	.hsync_len = { 0, 41, 0 },
+
+	.vactive = { 0, 272, 0 },
+	.vfront_porch = { 0, 4, 0 },
+	.vback_porch = { 0, 2, 0 },
+	.vsync_len = { 0, 10, 0 },
+
+	.flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
+		DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE,
+};
+
+static struct panel_dpi_platform_data overo_lcd43_pdata = {
+	.name                   = "lcd43",
+	.source                 = "dpi.0",
+
+	.data_lines		= 24,
+
+	.display_timing		= &overo_lcd43_videomode,
+
+	.enable_gpio		= OVERO_GPIO_LCD_EN,
+	.backlight_gpio		= OVERO_GPIO_LCD_BL,
+};
+
+static struct platform_device overo_lcd43_device = {
+	.name                   = "panel-dpi",
+	.id                     = 0,
+	.dev.platform_data      = &overo_lcd43_pdata,
+};
+
+static struct connector_dvi_platform_data overo_dvi_connector_pdata = {
+	.name                   = "dvi",
+	.source                 = "tfp410.0",
+	.i2c_bus_num            = 3,
+};
+
+static struct platform_device overo_dvi_connector_device = {
+	.name                   = "connector-dvi",
+	.id                     = 0,
+	.dev.platform_data      = &overo_dvi_connector_pdata,
+};
+
+static struct encoder_tfp410_platform_data overo_tfp410_pdata = {
+	.name                   = "tfp410.0",
+	.source                 = "dpi.0",
+	.data_lines             = 24,
+	.power_down_gpio        = -1,
+};
+
+static struct platform_device overo_tfp410_device = {
+	.name                   = "tfp410",
+	.id                     = 0,
+	.dev.platform_data      = &overo_tfp410_pdata,
+};
+
+static struct omap_dss_board_info overo_dss_data = {
+	.default_display_name = "lcd43",
 };
 
 static void __init overo_display_init(void)
 {
-	if (gpio_request_array(overo_dss_gpios, ARRAY_SIZE(overo_dss_gpios))) {
-		printk(KERN_ERR "could not obtain DSS control GPIOs\n");
-		return;
-	}
+	omap_display_init(&overo_dss_data);
 
-	gpio_export(OVERO_GPIO_LCD_EN, 0);
-	gpio_export(OVERO_GPIO_LCD_BL, 0);
+	if (!overo_use_lcd35)
+		platform_device_register(&overo_lcd43_device);
+	platform_device_register(&overo_tfp410_device);
+	platform_device_register(&overo_dvi_connector_device);
+	platform_device_register(&overo_tv_connector_device);
 }
-
-static int overo_panel_enable_dvi(struct omap_dss_device *dssdev)
-{
-	if (lcd_enabled) {
-		printk(KERN_ERR "cannot enable DVI, LCD is enabled\n");
-		return -EINVAL;
-	}
-	dvi_enabled = 1;
-
-	return 0;
-}
-
-static void overo_panel_disable_dvi(struct omap_dss_device *dssdev)
-{
-	dvi_enabled = 0;
-}
-
-static struct panel_generic_dpi_data dvi_panel = {
-	.name			= "generic",
-	.platform_enable	= overo_panel_enable_dvi,
-	.platform_disable	= overo_panel_disable_dvi,
-};
-
-static struct omap_dss_device overo_dvi_device = {
-	.name			= "dvi",
-	.type			= OMAP_DISPLAY_TYPE_DPI,
-	.driver_name		= "generic_dpi_panel",
-	.data			= &dvi_panel,
-	.phy.dpi.data_lines	= 24,
-};
-
-static struct omap_dss_device overo_tv_device = {
-	.name = "tv",
-	.driver_name = "venc",
-	.type = OMAP_DISPLAY_TYPE_VENC,
-	.phy.venc.type = OMAP_DSS_VENC_TYPE_SVIDEO,
-};
-
-static int overo_panel_enable_lcd(struct omap_dss_device *dssdev)
-{
-	if (dvi_enabled) {
-		printk(KERN_ERR "cannot enable LCD, DVI is enabled\n");
-		return -EINVAL;
-	}
-
-	gpio_set_value(OVERO_GPIO_LCD_EN, 1);
-	gpio_set_value(OVERO_GPIO_LCD_BL, 1);
-	lcd_enabled = 1;
-	return 0;
-}
-
-static void overo_panel_disable_lcd(struct omap_dss_device *dssdev)
-{
-	gpio_set_value(OVERO_GPIO_LCD_EN, 0);
-	gpio_set_value(OVERO_GPIO_LCD_BL, 0);
-	lcd_enabled = 0;
-}
-
-static struct panel_generic_dpi_data lcd43_panel = {
-	.name			= "samsung_lte430wq_f0c",
-	.platform_enable	= overo_panel_enable_lcd,
-	.platform_disable	= overo_panel_disable_lcd,
-};
-
-static struct omap_dss_device overo_lcd43_device = {
-	.name			= "lcd43",
-	.type			= OMAP_DISPLAY_TYPE_DPI,
-	.driver_name		= "generic_dpi_panel",
-	.data			= &lcd43_panel,
-	.phy.dpi.data_lines	= 24,
-};
-
-#if defined(CONFIG_PANEL_LGPHILIPS_LB035Q02) || \
-	defined(CONFIG_PANEL_LGPHILIPS_LB035Q02_MODULE)
-static struct omap_dss_device overo_lcd35_device = {
-	.type			= OMAP_DISPLAY_TYPE_DPI,
-	.name			= "lcd35",
-	.driver_name		= "lgphilips_lb035q02_panel",
-	.phy.dpi.data_lines	= 24,
-	.platform_enable	= overo_panel_enable_lcd,
-	.platform_disable	= overo_panel_disable_lcd,
-};
-#endif
-
-static struct omap_dss_device *overo_dss_devices[] = {
-	&overo_dvi_device,
-	&overo_tv_device,
-#if defined(CONFIG_PANEL_LGPHILIPS_LB035Q02) || \
-	defined(CONFIG_PANEL_LGPHILIPS_LB035Q02_MODULE)
-	&overo_lcd35_device,
-#endif
-	&overo_lcd43_device,
-};
-
-static struct omap_dss_board_info overo_dss_data = {
-	.num_devices	= ARRAY_SIZE(overo_dss_devices),
-	.devices	= overo_dss_devices,
-	.default_device	= &overo_dvi_device,
-};
-
-static struct regulator_consumer_supply overo_vdda_dac_supply =
-	REGULATOR_SUPPLY("vdda_dac", "omapdss_venc");
-
-static struct regulator_consumer_supply overo_vdds_dsi_supply[] = {
-	REGULATOR_SUPPLY("vdds_dsi", "omapdss"),
-	REGULATOR_SUPPLY("vdds_dsi", "omapdss_dsi1"),
-};
 
 static struct mtd_partition overo_nand_partitions[] = {
 	{
@@ -319,8 +287,8 @@ static struct omap2_hsmmc_info mmc[] = {
 	{}	/* Terminator */
 };
 
-static struct regulator_consumer_supply overo_vmmc1_supply = {
-	.supply			= "vmmc",
+static struct regulator_consumer_supply overo_vmmc1_supply[] = {
+	REGULATOR_SUPPLY("vmmc", "omap_hsmmc.0"),
 };
 
 #if defined(CONFIG_LEDS_GPIO) || defined(CONFIG_LEDS_GPIO_MODULE)
@@ -413,10 +381,6 @@ static inline void __init overo_init_keys(void) { return; }
 static int overo_twl_gpio_setup(struct device *dev,
 		unsigned gpio, unsigned ngpio)
 {
-	omap2_hsmmc_init(mmc);
-
-	overo_vmmc1_supply.dev = mmc[0].dev;
-
 #if defined(CONFIG_LEDS_GPIO) || defined(CONFIG_LEDS_GPIO_MODULE)
 	/* TWL4030_GPIO_MAX + 1 == ledB, PMU_STAT (out, active low LED) */
 	gpio_leds[2].gpio = gpio + TWL4030_GPIO_MAX + 1;
@@ -426,15 +390,8 @@ static int overo_twl_gpio_setup(struct device *dev,
 }
 
 static struct twl4030_gpio_platform_data overo_gpio_data = {
-	.gpio_base	= OMAP_MAX_GPIO_LINES,
-	.irq_base	= TWL4030_GPIO_IRQ_BASE,
-	.irq_end	= TWL4030_GPIO_IRQ_END,
 	.use_leds	= true,
 	.setup		= overo_twl_gpio_setup,
-};
-
-static struct twl4030_usb_data overo_usb_data = {
-	.usb_mode	= T2_USB_MODE_ULPI,
 };
 
 static struct regulator_init_data overo_vmmc1 = {
@@ -447,101 +404,77 @@ static struct regulator_init_data overo_vmmc1 = {
 					| REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 	},
-	.num_consumer_supplies	= 1,
-	.consumer_supplies	= &overo_vmmc1_supply,
-};
-
-/* VDAC for DSS driving S-Video (8 mA unloaded, max 65 mA) */
-static struct regulator_init_data overo_vdac = {
-	.constraints = {
-		.min_uV			= 1800000,
-		.max_uV			= 1800000,
-		.valid_modes_mask	= REGULATOR_MODE_NORMAL
-					| REGULATOR_MODE_STANDBY,
-		.valid_ops_mask		= REGULATOR_CHANGE_MODE
-					| REGULATOR_CHANGE_STATUS,
-	},
-	.num_consumer_supplies	= 1,
-	.consumer_supplies	= &overo_vdda_dac_supply,
-};
-
-/* VPLL2 for digital video outputs */
-static struct regulator_init_data overo_vpll2 = {
-	.constraints = {
-		.name			= "VDVI",
-		.min_uV			= 1800000,
-		.max_uV			= 1800000,
-		.valid_modes_mask	= REGULATOR_MODE_NORMAL
-					| REGULATOR_MODE_STANDBY,
-		.valid_ops_mask		= REGULATOR_CHANGE_MODE
-					| REGULATOR_CHANGE_STATUS,
-	},
-	.num_consumer_supplies	= ARRAY_SIZE(overo_vdds_dsi_supply),
-	.consumer_supplies	= overo_vdds_dsi_supply,
-};
-
-static struct twl4030_codec_audio_data overo_audio_data;
-
-static struct twl4030_codec_data overo_codec_data = {
-	.audio_mclk = 26000000,
-	.audio = &overo_audio_data,
+	.num_consumer_supplies	= ARRAY_SIZE(overo_vmmc1_supply),
+	.consumer_supplies	= overo_vmmc1_supply,
 };
 
 static struct twl4030_platform_data overo_twldata = {
-	.irq_base	= TWL4030_IRQ_BASE,
-	.irq_end	= TWL4030_IRQ_END,
 	.gpio		= &overo_gpio_data,
-	.usb		= &overo_usb_data,
-	.codec		= &overo_codec_data,
 	.vmmc1		= &overo_vmmc1,
-	.vdac		= &overo_vdac,
-	.vpll2		= &overo_vpll2,
 };
 
 static int __init overo_i2c_init(void)
 {
+	omap3_pmic_get_config(&overo_twldata,
+			TWL_COMMON_PDATA_USB | TWL_COMMON_PDATA_AUDIO,
+			TWL_COMMON_REGULATOR_VDAC | TWL_COMMON_REGULATOR_VPLL2);
+
+	overo_twldata.vpll2->constraints.name = "VDVI";
+
 	omap3_pmic_init("tps65950", &overo_twldata);
 	/* i2c2 pins are used for gpio */
 	omap_register_i2c_bus(3, 400, NULL, 0);
 	return 0;
 }
 
+static struct panel_lb035q02_platform_data overo_lcd35_pdata = {
+	.name                   = "lcd35",
+	.source                 = "dpi.0",
+
+	.data_lines		= 24,
+
+	.enable_gpio		= OVERO_GPIO_LCD_EN,
+	.backlight_gpio		= OVERO_GPIO_LCD_BL,
+};
+
+/*
+ * NOTE: We need to add either the lgphilips panel, or the lcd43 panel. The
+ * selection is done based on the overo_use_lcd35 field. If new SPI
+ * devices are added here, extra work is needed to make only the lgphilips panel
+ * affected by the overo_use_lcd35 field.
+ */
 static struct spi_board_info overo_spi_board_info[] __initdata = {
-#if defined(CONFIG_PANEL_LGPHILIPS_LB035Q02) || \
-	defined(CONFIG_PANEL_LGPHILIPS_LB035Q02_MODULE)
 	{
-		.modalias		= "lgphilips_lb035q02_panel-spi",
+		.modalias		= "panel_lgphilips_lb035q02",
 		.bus_num		= 1,
 		.chip_select		= 1,
 		.max_speed_hz		= 500000,
 		.mode			= SPI_MODE_3,
+		.platform_data		= &overo_lcd35_pdata,
 	},
-#endif
 };
 
 static int __init overo_spi_init(void)
 {
 	overo_ads7846_init();
-	spi_register_board_info(overo_spi_board_info,
-			ARRAY_SIZE(overo_spi_board_info));
+
+	if (overo_use_lcd35) {
+		spi_register_board_info(overo_spi_board_info,
+				ARRAY_SIZE(overo_spi_board_info));
+	}
 	return 0;
 }
 
-static void __init overo_init_early(void)
-{
-	omap2_init_common_infrastructure();
-	omap2_init_common_devices(mt46h32m32lf6_sdrc_params,
-				  mt46h32m32lf6_sdrc_params);
-}
+static struct usbhs_phy_data phy_data[] __initdata = {
+	{
+		.port = 2,
+		.reset_gpio = OVERO_GPIO_USBH_NRESET,
+		.vcc_gpio = -EINVAL,
+	},
+};
 
-static const struct usbhs_omap_board_data usbhs_bdata __initconst = {
-	.port_mode[0] = OMAP_USBHS_PORT_MODE_UNUSED,
+static struct usbhs_omap_platform_data usbhs_bdata __initdata = {
 	.port_mode[1] = OMAP_EHCI_PORT_MODE_PHY,
-	.port_mode[2] = OMAP_USBHS_PORT_MODE_UNUSED,
-	.phy_reset  = true,
-	.reset_gpio_port[0]  = -EINVAL,
-	.reset_gpio_port[1]  = OVERO_GPIO_USBH_NRESET,
-	.reset_gpio_port[2]  = -EINVAL
 };
 
 #ifdef CONFIG_OMAP_MUX
@@ -555,24 +488,41 @@ static struct gpio overo_bt_gpios[] __initdata = {
 	{ OVERO_GPIO_BT_NRESET, GPIOF_OUT_INIT_HIGH,	"lcd bl enable" },
 };
 
+static struct regulator_consumer_supply dummy_supplies[] = {
+	REGULATOR_SUPPLY("vddvario", "smsc911x.0"),
+	REGULATOR_SUPPLY("vdd33a", "smsc911x.0"),
+	REGULATOR_SUPPLY("vddvario", "smsc911x.1"),
+	REGULATOR_SUPPLY("vdd33a", "smsc911x.1"),
+};
+
 static void __init overo_init(void)
 {
 	int ret;
 
+	if (strstr(boot_command_line, "omapdss.def_disp=lcd35"))
+		overo_use_lcd35 = true;
+
+	regulator_register_fixed(0, dummy_supplies, ARRAY_SIZE(dummy_supplies));
 	omap3_mux_init(board_mux, OMAP_PACKAGE_CBB);
 	overo_i2c_init();
-	omap_display_init(&overo_dss_data);
+	omap_hsmmc_init(mmc);
 	omap_serial_init();
-	omap_nand_flash_init(0, overo_nand_partitions,
-			     ARRAY_SIZE(overo_nand_partitions));
+	omap_sdrc_init(mt46h32m32lf6_sdrc_params,
+				  mt46h32m32lf6_sdrc_params);
+	board_nand_init(overo_nand_partitions,
+			ARRAY_SIZE(overo_nand_partitions), NAND_CS, 0, NULL);
+	usb_bind_phy("musb-hdrc.0.auto", 0, "twl4030_usb");
 	usb_musb_init(NULL);
+
+	usbhs_init_phys(phy_data, ARRAY_SIZE(phy_data));
 	usbhs_init(&usbhs_bdata);
 	overo_spi_init();
-	overo_ads7846_init();
 	overo_init_smsc911x();
-	overo_display_init();
 	overo_init_led();
 	overo_init_keys();
+	omap_twl4030_audio_init("overo", NULL);
+
+	overo_display_init();
 
 	/* Ensure SDRC pins are mux'd for self-refresh */
 	omap_mux_init_signal("sdrc_cke0", OMAP_PIN_OUTPUT);
@@ -586,8 +536,7 @@ static void __init overo_init(void)
 		udelay(10);
 		gpio_set_value(OVERO_GPIO_W2W_NRESET, 1);
 	} else {
-		printk(KERN_ERR "could not obtain gpio for "
-					"OVERO_GPIO_W2W_NRESET\n");
+		pr_err("could not obtain gpio for OVERO_GPIO_W2W_NRESET\n");
 	}
 
 	ret = gpio_request_array(overo_bt_gpios, ARRAY_SIZE(overo_bt_gpios));
@@ -606,16 +555,18 @@ static void __init overo_init(void)
 	if (ret == 0)
 		gpio_export(OVERO_GPIO_USBH_CPEN, 0);
 	else
-		printk(KERN_ERR "could not obtain gpio for "
-					"OVERO_GPIO_USBH_CPEN\n");
+		pr_err("could not obtain gpio for OVERO_GPIO_USBH_CPEN\n");
 }
 
 MACHINE_START(OVERO, "Gumstix Overo")
-	.boot_params	= 0x80000100,
+	.atag_offset	= 0x100,
 	.reserve	= omap_reserve,
 	.map_io		= omap3_map_io,
-	.init_early	= overo_init_early,
-	.init_irq	= omap_init_irq,
+	.init_early	= omap35xx_init_early,
+	.init_irq	= omap3_init_irq,
+	.handle_irq	= omap3_intc_handle_irq,
 	.init_machine	= overo_init,
-	.timer		= &omap_timer,
+	.init_late	= omap35xx_init_late,
+	.init_time	= omap3_sync32k_timer_init,
+	.restart	= omap3xxx_restart,
 MACHINE_END

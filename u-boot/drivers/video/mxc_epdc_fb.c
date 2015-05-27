@@ -1,20 +1,7 @@
 /*
- * Copyright (C) 2010-2012 Freescale Semiconductor, Inc.
+ * Copyright (C) 2010-2014 Freescale Semiconductor, Inc. All Rights Reserved.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 /*
  * Based on STMP378X LCDIF
@@ -27,19 +14,13 @@
 #include <linux/err.h>
 #include <linux/types.h>
 
-#include "mxc_epdc_fb.h"
-
-
-extern int setup_waveform_file();
-extern void epdc_power_on();
-extern void epdc_power_off();
+#include <mxc_epdc_fb.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
 void *lcd_base;			/* Start of framebuffer memory	*/
 void *lcd_console_address;	/* Start of console buffer	*/
 
-int lcd_line_length;
 int lcd_color_fg;
 int lcd_color_bg;
 
@@ -372,6 +353,7 @@ void lcd_enable(void)
 
 	epdc_power_on();
 
+	lcd_base = (void *)CONFIG_FB_BASE;
 	/* Draw black border around framebuffer*/
 	memset(lcd_base, 0xFF, panel_info.vl_col * panel_info.vl_row);
 	memset(lcd_base, 0x0, 24 * panel_info.vl_col);
@@ -382,6 +364,8 @@ void lcd_enable(void)
 	}
 	memset((u8 *)lcd_base + panel_info.vl_col * (panel_info.vl_row - 24),
 		0x00, 24 * panel_info.vl_col);
+
+	flush_cache((ulong)lcd_base, panel_info.vl_col * panel_info.vl_row);
 
 	/* Draw data to display */
 	draw_mode0();

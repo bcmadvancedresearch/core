@@ -4,74 +4,34 @@
  * (C) Copyright 2010
  * Stefano Babic, DENX Software Engineering, sbabic@denx.de
  *
- * IPUv3 Linux framebuffer:
+ * MX51 Linux framebuffer:
  *
- * (C) Copyright 2004-2011 Freescale Semiconductor, Inc.
+ * (C) Copyright 2004-2010 Freescale Semiconductor, Inc.
  *
- * See file CREDITS for list of people who contributed to this
- * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
-/* #define DEBUG */
 #include <common.h>
 #include <asm/errno.h>
 #include <linux/string.h>
 #include <linux/list.h>
 #include <linux/fb.h>
-#include <linux/mxcfb.h>
 #include <asm/io.h>
 #include <malloc.h>
-#include <lcd.h>
-#include <ipu.h>
+#include <video_fb.h>
 #include "videomodes.h"
-
-DECLARE_GLOBAL_DATA_PTR;
-
-extern vidinfo_t panel_info;
-
-void *lcd_base;			/* Start of framebuffer memory	*/
-void *lcd_console_address;	/* Start of console buffer	*/
-
-int lcd_line_length;
-int lcd_color_fg;
-int lcd_color_bg;
-
-short console_col;
-short console_row;
+#include "ipu.h"
+#include "mxcfb.h"
+#include "ipu_regs.h"
 
 static int mxcfb_map_video_memory(struct fb_info *fbi);
 static int mxcfb_unmap_video_memory(struct fb_info *fbi);
 
-void lcd_initcolregs(void)
-{
-}
-
-void lcd_setcolreg(ushort regno, ushort red, ushort green, ushort blue)
-{
-}
-
-void lcd_disable(void)
-{
-}
-
-void lcd_panel_disable(void)
-{
-}
+/* graphics setup */
+static GraphicDevice panel;
+static struct fb_videomode const *gmode;
+static uint8_t gdisp;
+static uint32_t gpixfmt;
 
 void fb_videomode_to_var(struct fb_var_screeninfo *var,
 			 const struct fb_videomode *mode)
@@ -439,15 +399,10 @@ static int mxcfb_map_video_memory(struct fb_info *fbi)
 		fbi->fix.smem_len = fbi->var.yres_virtual *
 				    fbi->fix.line_length;
 	}
-#if defined(CONFIG_ARCH_MMU)
-	fbi->screen_base =
-		(char *)iomem_to_phys((unsigned long)lcd_base);
-	fbi->fix.smem_start =
-		(unsigned long)iomem_to_phys((unsigned long)lcd_base);
-#else
-	fbi->screen_base = (char *)lcd_base;
-	fbi->fix.smem_start = (unsigned long)lcd_base;
-#endif
+	fbi->fix.smem_len = roundup(fbi->fix.smem_len, ARCH_DMA_MINALIGN);
+	fbi->screen_base = (char *)memalign(ARCH_DMA_MINALIGN,
+					    fbi->fix.smem_len);
+	fbi->fix.smem_start = (unsigned long)fbi->screen_base;
 	if (fbi->screen_base == 0) {
 		puts("Unable to allocate framebuffer memory\n");
 		fbi->fix.smem_len = 0;
@@ -459,6 +414,9 @@ static int mxcfb_map_video_memory(struct fb_info *fbi)
 		(uint32_t) fbi->fix.smem_start, fbi->fix.smem_len);
 
 	fbi->screen_size = fbi->fix.smem_len;
+
+	/* Clear the screen */
+	memset((char *)fbi->screen_base, 0, fbi->fix.smem_len);
 
 	return 0;
 }
@@ -529,7 +487,8 @@ static struct fb_info *mxcfb_init_fbinfo(void)
  *
  * @return      Appropriate error code to the kernel common code
  */
-static int mxcfb_probe(u32 interface_pix_fmt, struct fb_videomode *mode, int di)
+static int mxcfb_probe(u32 interface_pix_fmt, uint8_t disp,
+			struct fb_videomode const *mode)
 {
 	struct fb_info *fbi;
 	struct mxcfb_info *mxcfbi;
@@ -553,7 +512,7 @@ static int mxcfb_probe(u32 interface_pix_fmt, struct fb_videomode *mode, int di)
 		mxcfbi->blank = FB_BLANK_POWERDOWN;
 	}
 
-	mxcfbi->ipu_di = di;
+	mxcfbi->ipu_di = disp;
 
 	ipu_disp_set_global_alpha(mxcfbi->ipu_ch, 1, 0x80);
 	ipu_disp_set_color_key(mxcfbi->ipu_ch, 0, 0);
@@ -564,12 +523,12 @@ static int mxcfb_probe(u32 interface_pix_fmt, struct fb_videomode *mode, int di)
 	mxcfb_info[mxcfbi->ipu_di] = fbi;
 
 	/* Need dummy values until real panel is configured */
-	fbi->var.xres = 640;
-	fbi->var.yres = 480;
-	fbi->var.bits_per_pixel = 16;
 
 	mxcfbi->ipu_di_pix_fmt = interface_pix_fmt;
 	fb_videomode_to_var(&fbi->var, mode);
+	fbi->var.bits_per_pixel = 16;
+	fbi->fix.line_length = fbi->var.xres * (fbi->var.bits_per_pixel / 8);
+	fbi->fix.smem_len = fbi->var.yres_virtual * fbi->fix.line_length;
 
 	mxcfb_check_var(&fbi->var, fbi);
 
@@ -584,18 +543,16 @@ static int mxcfb_probe(u32 interface_pix_fmt, struct fb_videomode *mode, int di)
 
 	mxcfb_set_par(fbi);
 
-	/* Setting panel_info for lcd */
-	panel_info.vl_col = fbi->var.xres;
-	panel_info.vl_row = fbi->var.yres;
-	panel_info.vl_bpix = LCD_BPP;
+	panel.winSizeX = mode->xres;
+	panel.winSizeY = mode->yres;
+	panel.plnSizeX = mode->xres;
+	panel.plnSizeY = mode->yres;
 
-	lcd_line_length = (panel_info.vl_col * NBITS(panel_info.vl_bpix)) / 8;
+	panel.frameAdrs = (u32)fbi->screen_base;
+	panel.memSize = fbi->screen_size;
 
-	debug("MXC IPUV3 configured\n"
-		"XRES = %d YRES = %d BitsXpixel = %d\n",
-		panel_info.vl_col,
-		panel_info.vl_row,
-		panel_info.vl_bpix);
+	panel.gdfBytesPP = 2;
+	panel.gdfIndex = GDF_16BIT_565RGB;
 
 	ipu_dump_registers();
 
@@ -605,45 +562,55 @@ err0:
 	return ret;
 }
 
-ulong calc_fbsize(void)
+void ipuv3_fb_shutdown(void)
 {
-	return (panel_info.vl_col * panel_info.vl_row *
-		NBITS(panel_info.vl_bpix)) / 8;
+	int i;
+	struct ipu_stat *stat = (struct ipu_stat *)IPU_STAT;
+
+	for (i = 0; i < ARRAY_SIZE(mxcfb_info); i++) {
+		struct fb_info *fbi = mxcfb_info[i];
+		if (fbi) {
+			struct mxcfb_info *mxc_fbi = fbi->par;
+			ipu_disable_channel(mxc_fbi->ipu_ch);
+			ipu_uninit_channel(mxc_fbi->ipu_ch);
+		}
+	}
+	for (i = 0; i < ARRAY_SIZE(stat->int_stat); i++) {
+		__raw_writel(__raw_readl(&stat->int_stat[i]),
+			     &stat->int_stat[i]);
+	}
 }
 
-int overwrite_console(void)
-{
-	/* Keep stdout / stderr on serial, our LCD is for splashscreen only */
-	return 1;
-}
-
-void lcd_ctrl_init(void *lcdbase)
-{
-	u32 mem_len = panel_info.vl_col *
-		panel_info.vl_row *
-		NBITS(panel_info.vl_bpix) / 8;
-
-	/*
-	 * We rely on lcdbase being a physical address, i.e., either MMU off,
-	 * or 1-to-1 mapping. Might want to add some virt2phys here.
-	 */
-	if (!lcdbase)
-		return;
-
-	memset(lcdbase, 0, mem_len);
-}
-
-int ipuv3_fb_init(struct fb_videomode *mode, int di, int interface_pix_fmt,
-		  ipu_di_clk_parent_t di_clk_parent, int di_clk_val)
+void *video_hw_init(void)
 {
 	int ret;
 
-	ret = ipu_probe(di, di_clk_parent, di_clk_val);
+	ret = ipu_probe();
 	if (ret)
 		puts("Error initializing IPU\n");
 
-	debug("Framebuffer at 0x%x\n", (unsigned int)lcd_base);
-	ret = mxcfb_probe(interface_pix_fmt, mode, di);
+	ret = mxcfb_probe(gpixfmt, gdisp, gmode);
+	debug("Framebuffer at 0x%x\n", (unsigned int)panel.frameAdrs);
 
-	return ret;
+	return (void *)&panel;
+}
+
+void video_set_lut(unsigned int index, /* color number */
+			unsigned char r,    /* red */
+			unsigned char g,    /* green */
+			unsigned char b     /* blue */
+			)
+{
+	return;
+}
+
+int ipuv3_fb_init(struct fb_videomode const *mode,
+		  uint8_t disp,
+		  uint32_t pixfmt)
+{
+	gmode = mode;
+	gdisp = disp;
+	gpixfmt = pixfmt;
+
+	return 0;
 }

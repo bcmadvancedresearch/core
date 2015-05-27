@@ -26,6 +26,7 @@
 #include <linux/delay.h>
 #include <linux/log2.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 #include <asm/unaligned.h>
 #include <net/tcp.h>
 #include <scsi/scsi_cmnd.h>
@@ -83,22 +84,6 @@ MODULE_PARM_DESC(debug_libiscsi_eh,
 					     "%s " dbg_fmt,		\
 					     __func__, ##arg);		\
 	} while (0);
-
-/* Serial Number Arithmetic, 32 bits, less than, RFC1982 */
-#define SNA32_CHECK 2147483648UL
-
-static int iscsi_sna_lt(u32 n1, u32 n2)
-{
-	return n1 != n2 && ((n1 < n2 && (n2 - n1 < SNA32_CHECK)) ||
-			    (n1 > n2 && (n2 - n1 < SNA32_CHECK)));
-}
-
-/* Serial Number Arithmetic, 32 bits, less than, RFC1982 */
-static int iscsi_sna_lte(u32 n1, u32 n2)
-{
-	return n1 == n2 || ((n1 < n2 && (n2 - n1 < SNA32_CHECK)) ||
-			    (n1 > n2 && (n2 - n1 < SNA32_CHECK)));
-}
 
 inline void iscsi_conn_queue_work(struct iscsi_conn *conn)
 {
@@ -169,7 +154,7 @@ void iscsi_prep_data_out_pdu(struct iscsi_task *task, struct iscsi_r2t_info *r2t
 	hdr->datasn = cpu_to_be32(r2t->datasn);
 	r2t->datasn++;
 	hdr->opcode = ISCSI_OP_SCSI_DATA_OUT;
-	memcpy(hdr->lun, task->lun, sizeof(hdr->lun));
+	hdr->lun = task->lun;
 	hdr->itt = task->hdr_itt;
 	hdr->exp_statsn = r2t->exp_statsn;
 	hdr->offset = cpu_to_be32(r2t->data_offset + r2t->sent);
@@ -296,7 +281,7 @@ static int iscsi_check_tmf_restrictions(struct iscsi_task *task, int opcode)
 		/*
 		 * Allow PDUs for unrelated LUNs
 		 */
-		hdr_lun = scsilun_to_int((struct scsi_lun *)tmf->lun);
+		hdr_lun = scsilun_to_int(&tmf->lun);
 		if (hdr_lun != task->sc->device->lun)
 			return 0;
 		/* fall through */
@@ -360,7 +345,7 @@ static int iscsi_prep_scsi_cmd_pdu(struct iscsi_task *task)
 	struct iscsi_conn *conn = task->conn;
 	struct iscsi_session *session = conn->session;
 	struct scsi_cmnd *sc = task->sc;
-	struct iscsi_cmd *hdr;
+	struct iscsi_scsi_req *hdr;
 	unsigned hdrlength, cmd_len;
 	itt_t itt;
 	int rc;
@@ -374,7 +359,7 @@ static int iscsi_prep_scsi_cmd_pdu(struct iscsi_task *task)
 		if (rc)
 			return rc;
 	}
-	hdr = (struct iscsi_cmd *) task->hdr;
+	hdr = (struct iscsi_scsi_req *)task->hdr;
 	itt = hdr->itt;
 	memset(hdr, 0, sizeof(*hdr));
 
@@ -389,8 +374,8 @@ static int iscsi_prep_scsi_cmd_pdu(struct iscsi_task *task)
 		return rc;
 	hdr->opcode = ISCSI_OP_SCSI_CMD;
 	hdr->flags = ISCSI_ATTR_SIMPLE;
-	int_to_scsilun(sc->device->lun, (struct scsi_lun *)hdr->lun);
-	memcpy(task->lun, hdr->lun, sizeof(task->lun));
+	int_to_scsilun(sc->device->lun, &hdr->lun);
+	task->lun = hdr->lun;
 	hdr->exp_statsn = cpu_to_be32(conn->exp_statsn);
 	cmd_len = sc->cmd_len;
 	if (cmd_len < ISCSI_CDB_SIZE)
@@ -522,7 +507,6 @@ static void iscsi_free_task(struct iscsi_task *task)
 	kfifo_in(&session->cmdpool.queue, (void*)&task, sizeof(void*));
 
 	if (sc) {
-		task->sc = NULL;
 		/* SCSI eh reuses commands to verify us */
 		sc->SCp.ptr = NULL;
 		/*
@@ -733,10 +717,20 @@ __iscsi_conn_send_pdu(struct iscsi_conn *conn, struct iscsi_hdr *hdr,
 			return NULL;
 		}
 
+		if (data_size > ISCSI_DEF_MAX_RECV_SEG_LEN) {
+			iscsi_conn_printk(KERN_ERR, conn, "Invalid buffer len of %u for login task. Max len is %u\n", data_size, ISCSI_DEF_MAX_RECV_SEG_LEN);
+			return NULL;
+		}
+
 		task = conn->login_task;
 	} else {
 		if (session->state != ISCSI_STATE_LOGGED_IN)
 			return NULL;
+
+		if (data_size != 0) {
+			iscsi_conn_printk(KERN_ERR, conn, "Can not send data buffer of len %u for op 0x%x\n", data_size, opcode);
+			return NULL;
+		}
 
 		BUG_ON(conn->c_stage == ISCSI_CONN_INITIAL_STAGE);
 		BUG_ON(conn->c_stage == ISCSI_CONN_STOPPED);
@@ -830,7 +824,7 @@ static void iscsi_scsi_cmd_rsp(struct iscsi_conn *conn, struct iscsi_hdr *hdr,
 			       struct iscsi_task *task, char *data,
 			       int datalen)
 {
-	struct iscsi_cmd_rsp *rhdr = (struct iscsi_cmd_rsp *)hdr;
+	struct iscsi_scsi_rsp *rhdr = (struct iscsi_scsi_rsp *)hdr;
 	struct iscsi_session *session = conn->session;
 	struct scsi_cmnd *sc = task->sc;
 
@@ -968,7 +962,7 @@ static void iscsi_send_nopout(struct iscsi_conn *conn, struct iscsi_nopin *rhdr)
 	hdr.flags = ISCSI_FLAG_CMD_FINAL;
 
 	if (rhdr) {
-		memcpy(hdr.lun, rhdr->lun, 8);
+		hdr.lun = rhdr->lun;
 		hdr.ttt = rhdr->ttt;
 		hdr.itt = RESERVED_ITT;
 	} else
@@ -1924,6 +1918,16 @@ static enum blk_eh_timer_return iscsi_eh_cmd_timed_out(struct scsi_cmnd *sc)
 	ISCSI_DBG_EH(session, "scsi cmd %p timedout\n", sc);
 
 	spin_lock(&session->lock);
+	task = (struct iscsi_task *)sc->SCp.ptr;
+	if (!task) {
+		/*
+		 * Raced with completion. Blk layer has taken ownership
+		 * so let timeout code complete it now.
+		 */
+		rc = BLK_EH_HANDLED;
+		goto done;
+	}
+
 	if (session->state != ISCSI_STATE_LOGGED_IN) {
 		/*
 		 * We are probably in the middle of iscsi recovery so let
@@ -1936,16 +1940,6 @@ static enum blk_eh_timer_return iscsi_eh_cmd_timed_out(struct scsi_cmnd *sc)
 	conn = session->leadconn;
 	if (!conn) {
 		/* In the middle of shuting down */
-		rc = BLK_EH_RESET_TIMER;
-		goto done;
-	}
-
-	task = (struct iscsi_task *)sc->SCp.ptr;
-	if (!task) {
-		/*
-		 * Raced with completion. Just reset timer, and let it
-		 * complete normally
-		 */
 		rc = BLK_EH_RESET_TIMER;
 		goto done;
 	}
@@ -2092,7 +2086,7 @@ static void iscsi_prep_abort_task_pdu(struct iscsi_task *task,
 	hdr->opcode = ISCSI_OP_SCSI_TMFUNC | ISCSI_OP_IMMEDIATE;
 	hdr->flags = ISCSI_TM_FUNC_ABORT_TASK & ISCSI_FLAG_TM_FUNC_MASK;
 	hdr->flags |= ISCSI_FLAG_CMD_FINAL;
-	memcpy(hdr->lun, task->lun, sizeof(hdr->lun));
+	hdr->lun = task->lun;
 	hdr->rtt = task->hdr_itt;
 	hdr->refcmdsn = task->cmdsn;
 }
@@ -2233,7 +2227,7 @@ static void iscsi_prep_lun_reset_pdu(struct scsi_cmnd *sc, struct iscsi_tm *hdr)
 	hdr->opcode = ISCSI_OP_SCSI_TMFUNC | ISCSI_OP_IMMEDIATE;
 	hdr->flags = ISCSI_TM_FUNC_LOGICAL_UNIT_RESET & ISCSI_FLAG_TM_FUNC_MASK;
 	hdr->flags |= ISCSI_FLAG_CMD_FINAL;
-	int_to_scsilun(sc->device->lun, (struct scsi_lun *)hdr->lun);
+	int_to_scsilun(sc->device->lun, &hdr->lun);
 	hdr->rtt = RESERVED_ITT;
 }
 
@@ -2822,8 +2816,14 @@ void iscsi_session_teardown(struct iscsi_cls_session *cls_session)
 	kfree(session->username);
 	kfree(session->username_in);
 	kfree(session->targetname);
+	kfree(session->targetalias);
 	kfree(session->initiatorname);
+	kfree(session->boot_root);
+	kfree(session->boot_nic);
+	kfree(session->boot_target);
 	kfree(session->ifacename);
+	kfree(session->portal_type);
+	kfree(session->discovery_parent_type);
 
 	iscsi_destroy_session(cls_session);
 	iscsi_host_dec_session_cnt(shost);
@@ -2955,6 +2955,7 @@ void iscsi_conn_teardown(struct iscsi_cls_conn *cls_conn)
 	free_pages((unsigned long) conn->data,
 		   get_order(ISCSI_DEF_MAX_RECV_SEG_LEN));
 	kfree(conn->persistent_address);
+	kfree(conn->local_ipaddr);
 	kfifo_in(&session->cmdpool.queue, (void*)&conn->login_task,
 		    sizeof(void*));
 	if (session->leadconn == conn)
@@ -3156,7 +3157,7 @@ int iscsi_conn_bind(struct iscsi_cls_session *cls_session,
 }
 EXPORT_SYMBOL_GPL(iscsi_conn_bind);
 
-static int iscsi_switch_str_param(char **param, char *new_val_buf)
+int iscsi_switch_str_param(char **param, char *new_val_buf)
 {
 	char *new_val;
 
@@ -3173,13 +3174,14 @@ static int iscsi_switch_str_param(char **param, char *new_val_buf)
 	*param = new_val;
 	return 0;
 }
+EXPORT_SYMBOL_GPL(iscsi_switch_str_param);
 
 int iscsi_set_param(struct iscsi_cls_conn *cls_conn,
 		    enum iscsi_param param, char *buf, int buflen)
 {
 	struct iscsi_conn *conn = cls_conn->dd_data;
 	struct iscsi_session *session = conn->session;
-	uint32_t value;
+	int val;
 
 	switch(param) {
 	case ISCSI_PARAM_FAST_ABORT:
@@ -3216,7 +3218,7 @@ int iscsi_set_param(struct iscsi_cls_conn *cls_conn,
 		sscanf(buf, "%d", &session->initial_r2t_en);
 		break;
 	case ISCSI_PARAM_MAX_R2T:
-		sscanf(buf, "%d", &session->max_r2t);
+		sscanf(buf, "%hu", &session->max_r2t);
 		break;
 	case ISCSI_PARAM_IMM_DATA_EN:
 		sscanf(buf, "%d", &session->imm_data_en);
@@ -3236,14 +3238,6 @@ int iscsi_set_param(struct iscsi_cls_conn *cls_conn,
 	case ISCSI_PARAM_ERL:
 		sscanf(buf, "%d", &session->erl);
 		break;
-	case ISCSI_PARAM_IFMARKER_EN:
-		sscanf(buf, "%d", &value);
-		BUG_ON(value);
-		break;
-	case ISCSI_PARAM_OFMARKER_EN:
-		sscanf(buf, "%d", &value);
-		BUG_ON(value);
-		break;
 	case ISCSI_PARAM_EXP_STATSN:
 		sscanf(buf, "%u", &conn->exp_statsn);
 		break;
@@ -3257,6 +3251,8 @@ int iscsi_set_param(struct iscsi_cls_conn *cls_conn,
 		return iscsi_switch_str_param(&session->password_in, buf);
 	case ISCSI_PARAM_TARGET_NAME:
 		return iscsi_switch_str_param(&session->targetname, buf);
+	case ISCSI_PARAM_TARGET_ALIAS:
+		return iscsi_switch_str_param(&session->targetalias, buf);
 	case ISCSI_PARAM_TPGT:
 		sscanf(buf, "%d", &session->tpgt);
 		break;
@@ -3269,6 +3265,23 @@ int iscsi_set_param(struct iscsi_cls_conn *cls_conn,
 		return iscsi_switch_str_param(&session->ifacename, buf);
 	case ISCSI_PARAM_INITIATOR_NAME:
 		return iscsi_switch_str_param(&session->initiatorname, buf);
+	case ISCSI_PARAM_BOOT_ROOT:
+		return iscsi_switch_str_param(&session->boot_root, buf);
+	case ISCSI_PARAM_BOOT_NIC:
+		return iscsi_switch_str_param(&session->boot_nic, buf);
+	case ISCSI_PARAM_BOOT_TARGET:
+		return iscsi_switch_str_param(&session->boot_target, buf);
+	case ISCSI_PARAM_PORTAL_TYPE:
+		return iscsi_switch_str_param(&session->portal_type, buf);
+	case ISCSI_PARAM_DISCOVERY_PARENT_TYPE:
+		return iscsi_switch_str_param(&session->discovery_parent_type,
+					      buf);
+	case ISCSI_PARAM_DISCOVERY_SESS:
+		sscanf(buf, "%d", &val);
+		session->discovery_sess = !!val;
+		break;
+	case ISCSI_PARAM_LOCAL_IPADDR:
+		return iscsi_switch_str_param(&conn->local_ipaddr, buf);
 	default:
 		return -ENOSYS;
 	}
@@ -3317,11 +3330,17 @@ int iscsi_session_get_param(struct iscsi_cls_session *cls_session,
 	case ISCSI_PARAM_DATASEQ_INORDER_EN:
 		len = sprintf(buf, "%d\n", session->dataseq_inorder_en);
 		break;
+	case ISCSI_PARAM_DEF_TASKMGMT_TMO:
+		len = sprintf(buf, "%d\n", session->def_taskmgmt_tmo);
+		break;
 	case ISCSI_PARAM_ERL:
 		len = sprintf(buf, "%d\n", session->erl);
 		break;
 	case ISCSI_PARAM_TARGET_NAME:
 		len = sprintf(buf, "%s\n", session->targetname);
+		break;
+	case ISCSI_PARAM_TARGET_ALIAS:
+		len = sprintf(buf, "%s\n", session->targetalias);
 		break;
 	case ISCSI_PARAM_TPGT:
 		len = sprintf(buf, "%d\n", session->tpgt);
@@ -3343,6 +3362,61 @@ int iscsi_session_get_param(struct iscsi_cls_session *cls_session,
 		break;
 	case ISCSI_PARAM_INITIATOR_NAME:
 		len = sprintf(buf, "%s\n", session->initiatorname);
+		break;
+	case ISCSI_PARAM_BOOT_ROOT:
+		len = sprintf(buf, "%s\n", session->boot_root);
+		break;
+	case ISCSI_PARAM_BOOT_NIC:
+		len = sprintf(buf, "%s\n", session->boot_nic);
+		break;
+	case ISCSI_PARAM_BOOT_TARGET:
+		len = sprintf(buf, "%s\n", session->boot_target);
+		break;
+	case ISCSI_PARAM_AUTO_SND_TGT_DISABLE:
+		len = sprintf(buf, "%u\n", session->auto_snd_tgt_disable);
+		break;
+	case ISCSI_PARAM_DISCOVERY_SESS:
+		len = sprintf(buf, "%u\n", session->discovery_sess);
+		break;
+	case ISCSI_PARAM_PORTAL_TYPE:
+		len = sprintf(buf, "%s\n", session->portal_type);
+		break;
+	case ISCSI_PARAM_CHAP_AUTH_EN:
+		len = sprintf(buf, "%u\n", session->chap_auth_en);
+		break;
+	case ISCSI_PARAM_DISCOVERY_LOGOUT_EN:
+		len = sprintf(buf, "%u\n", session->discovery_logout_en);
+		break;
+	case ISCSI_PARAM_BIDI_CHAP_EN:
+		len = sprintf(buf, "%u\n", session->bidi_chap_en);
+		break;
+	case ISCSI_PARAM_DISCOVERY_AUTH_OPTIONAL:
+		len = sprintf(buf, "%u\n", session->discovery_auth_optional);
+		break;
+	case ISCSI_PARAM_DEF_TIME2WAIT:
+		len = sprintf(buf, "%d\n", session->time2wait);
+		break;
+	case ISCSI_PARAM_DEF_TIME2RETAIN:
+		len = sprintf(buf, "%d\n", session->time2retain);
+		break;
+	case ISCSI_PARAM_TSID:
+		len = sprintf(buf, "%u\n", session->tsid);
+		break;
+	case ISCSI_PARAM_ISID:
+		len = sprintf(buf, "%02x%02x%02x%02x%02x%02x\n",
+			      session->isid[0], session->isid[1],
+			      session->isid[2], session->isid[3],
+			      session->isid[4], session->isid[5]);
+		break;
+	case ISCSI_PARAM_DISCOVERY_PARENT_IDX:
+		len = sprintf(buf, "%u\n", session->discovery_parent_idx);
+		break;
+	case ISCSI_PARAM_DISCOVERY_PARENT_TYPE:
+		if (session->discovery_parent_type)
+			len = sprintf(buf, "%s\n",
+				      session->discovery_parent_type);
+		else
+			len = sprintf(buf, "\n");
 		break;
 	default:
 		return -ENOSYS;
@@ -3432,6 +3506,57 @@ int iscsi_conn_get_param(struct iscsi_cls_conn *cls_conn,
 		break;
 	case ISCSI_PARAM_PERSISTENT_ADDRESS:
 		len = sprintf(buf, "%s\n", conn->persistent_address);
+		break;
+	case ISCSI_PARAM_STATSN:
+		len = sprintf(buf, "%u\n", conn->statsn);
+		break;
+	case ISCSI_PARAM_MAX_SEGMENT_SIZE:
+		len = sprintf(buf, "%u\n", conn->max_segment_size);
+		break;
+	case ISCSI_PARAM_KEEPALIVE_TMO:
+		len = sprintf(buf, "%u\n", conn->keepalive_tmo);
+		break;
+	case ISCSI_PARAM_LOCAL_PORT:
+		len = sprintf(buf, "%u\n", conn->local_port);
+		break;
+	case ISCSI_PARAM_TCP_TIMESTAMP_STAT:
+		len = sprintf(buf, "%u\n", conn->tcp_timestamp_stat);
+		break;
+	case ISCSI_PARAM_TCP_NAGLE_DISABLE:
+		len = sprintf(buf, "%u\n", conn->tcp_nagle_disable);
+		break;
+	case ISCSI_PARAM_TCP_WSF_DISABLE:
+		len = sprintf(buf, "%u\n", conn->tcp_wsf_disable);
+		break;
+	case ISCSI_PARAM_TCP_TIMER_SCALE:
+		len = sprintf(buf, "%u\n", conn->tcp_timer_scale);
+		break;
+	case ISCSI_PARAM_TCP_TIMESTAMP_EN:
+		len = sprintf(buf, "%u\n", conn->tcp_timestamp_en);
+		break;
+	case ISCSI_PARAM_IP_FRAGMENT_DISABLE:
+		len = sprintf(buf, "%u\n", conn->fragment_disable);
+		break;
+	case ISCSI_PARAM_IPV4_TOS:
+		len = sprintf(buf, "%u\n", conn->ipv4_tos);
+		break;
+	case ISCSI_PARAM_IPV6_TC:
+		len = sprintf(buf, "%u\n", conn->ipv6_traffic_class);
+		break;
+	case ISCSI_PARAM_IPV6_FLOW_LABEL:
+		len = sprintf(buf, "%u\n", conn->ipv6_flow_label);
+		break;
+	case ISCSI_PARAM_IS_FW_ASSIGNED_IPV6:
+		len = sprintf(buf, "%u\n", conn->is_fw_assigned_ipv6);
+		break;
+	case ISCSI_PARAM_TCP_XMIT_WSF:
+		len = sprintf(buf, "%u\n", conn->tcp_xmit_wsf);
+		break;
+	case ISCSI_PARAM_TCP_RECV_WSF:
+		len = sprintf(buf, "%u\n", conn->tcp_recv_wsf);
+		break;
+	case ISCSI_PARAM_LOCAL_IPADDR:
+		len = sprintf(buf, "%s\n", conn->local_ipaddr);
 		break;
 	default:
 		return -ENOSYS;

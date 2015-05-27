@@ -32,7 +32,7 @@ void xhci_dbg_regs(struct xhci_hcd *xhci)
 
 	xhci_dbg(xhci, "// xHCI capability registers at %p:\n",
 			xhci->cap_regs);
-	temp = xhci_readl(xhci, &xhci->cap_regs->hc_capbase);
+	temp = readl(&xhci->cap_regs->hc_capbase);
 	xhci_dbg(xhci, "// @%p = 0x%x (CAPLENGTH AND HCIVERSION)\n",
 			&xhci->cap_regs->hc_capbase, temp);
 	xhci_dbg(xhci, "//   CAPLENGTH: 0x%x\n",
@@ -44,13 +44,13 @@ void xhci_dbg_regs(struct xhci_hcd *xhci)
 
 	xhci_dbg(xhci, "// xHCI operational registers at %p:\n", xhci->op_regs);
 
-	temp = xhci_readl(xhci, &xhci->cap_regs->run_regs_off);
+	temp = readl(&xhci->cap_regs->run_regs_off);
 	xhci_dbg(xhci, "// @%p = 0x%x RTSOFF\n",
 			&xhci->cap_regs->run_regs_off,
 			(unsigned int) temp & RTSOFF_MASK);
 	xhci_dbg(xhci, "// xHCI runtime registers at %p:\n", xhci->run_regs);
 
-	temp = xhci_readl(xhci, &xhci->cap_regs->db_off);
+	temp = readl(&xhci->cap_regs->db_off);
 	xhci_dbg(xhci, "// @%p = 0x%x DBOFF\n", &xhci->cap_regs->db_off, temp);
 	xhci_dbg(xhci, "// Doorbell array at %p:\n", xhci->dba);
 }
@@ -61,7 +61,7 @@ static void xhci_print_cap_regs(struct xhci_hcd *xhci)
 
 	xhci_dbg(xhci, "xHCI capability registers at %p:\n", xhci->cap_regs);
 
-	temp = xhci_readl(xhci, &xhci->cap_regs->hc_capbase);
+	temp = readl(&xhci->cap_regs->hc_capbase);
 	xhci_dbg(xhci, "CAPLENGTH AND HCIVERSION 0x%x:\n",
 			(unsigned int) temp);
 	xhci_dbg(xhci, "CAPLENGTH: 0x%x\n",
@@ -69,7 +69,7 @@ static void xhci_print_cap_regs(struct xhci_hcd *xhci)
 	xhci_dbg(xhci, "HCIVERSION: 0x%x\n",
 			(unsigned int) HC_VERSION(temp));
 
-	temp = xhci_readl(xhci, &xhci->cap_regs->hcs_params1);
+	temp = readl(&xhci->cap_regs->hcs_params1);
 	xhci_dbg(xhci, "HCSPARAMS 1: 0x%x\n",
 			(unsigned int) temp);
 	xhci_dbg(xhci, "  Max device slots: %u\n",
@@ -79,7 +79,7 @@ static void xhci_print_cap_regs(struct xhci_hcd *xhci)
 	xhci_dbg(xhci, "  Max ports: %u\n",
 			(unsigned int) HCS_MAX_PORTS(temp));
 
-	temp = xhci_readl(xhci, &xhci->cap_regs->hcs_params2);
+	temp = readl(&xhci->cap_regs->hcs_params2);
 	xhci_dbg(xhci, "HCSPARAMS 2: 0x%x\n",
 			(unsigned int) temp);
 	xhci_dbg(xhci, "  Isoc scheduling threshold: %u\n",
@@ -87,7 +87,7 @@ static void xhci_print_cap_regs(struct xhci_hcd *xhci)
 	xhci_dbg(xhci, "  Maximum allowed segments in event ring: %u\n",
 			(unsigned int) HCS_ERST_MAX(temp));
 
-	temp = xhci_readl(xhci, &xhci->cap_regs->hcs_params3);
+	temp = readl(&xhci->cap_regs->hcs_params3);
 	xhci_dbg(xhci, "HCSPARAMS 3 0x%x:\n",
 			(unsigned int) temp);
 	xhci_dbg(xhci, "  Worst case U1 device exit latency: %u\n",
@@ -95,14 +95,14 @@ static void xhci_print_cap_regs(struct xhci_hcd *xhci)
 	xhci_dbg(xhci, "  Worst case U2 device exit latency: %u\n",
 			(unsigned int) HCS_U2_LATENCY(temp));
 
-	temp = xhci_readl(xhci, &xhci->cap_regs->hcc_params);
+	temp = readl(&xhci->cap_regs->hcc_params);
 	xhci_dbg(xhci, "HCC PARAMS 0x%x:\n", (unsigned int) temp);
 	xhci_dbg(xhci, "  HC generates %s bit addresses\n",
 			HCC_64BIT_ADDR(temp) ? "64" : "32");
 	/* FIXME */
 	xhci_dbg(xhci, "  FIXME: more HCCPARAMS debugging\n");
 
-	temp = xhci_readl(xhci, &xhci->cap_regs->run_regs_off);
+	temp = readl(&xhci->cap_regs->run_regs_off);
 	xhci_dbg(xhci, "RTSOFF 0x%x:\n", temp & RTSOFF_MASK);
 }
 
@@ -110,7 +110,7 @@ static void xhci_print_command_reg(struct xhci_hcd *xhci)
 {
 	u32 temp;
 
-	temp = xhci_readl(xhci, &xhci->op_regs->command);
+	temp = readl(&xhci->op_regs->command);
 	xhci_dbg(xhci, "USBCMD 0x%x:\n", temp);
 	xhci_dbg(xhci, "  HC is %s\n",
 			(temp & CMD_RUN) ? "running" : "being stopped");
@@ -119,7 +119,7 @@ static void xhci_print_command_reg(struct xhci_hcd *xhci)
 	xhci_dbg(xhci, "  Event Interrupts %s\n",
 			(temp & CMD_EIE) ? "enabled " : "disabled");
 	xhci_dbg(xhci, "  Host System Error Interrupts %s\n",
-			(temp & CMD_EIE) ? "enabled " : "disabled");
+			(temp & CMD_HSEIE) ? "enabled " : "disabled");
 	xhci_dbg(xhci, "  HC has %sfinished light reset\n",
 			(temp & CMD_LRESET) ? "not " : "");
 }
@@ -128,7 +128,7 @@ static void xhci_print_status(struct xhci_hcd *xhci)
 {
 	u32 temp;
 
-	temp = xhci_readl(xhci, &xhci->op_regs->status);
+	temp = readl(&xhci->op_regs->status);
 	xhci_dbg(xhci, "USBSTS 0x%x:\n", temp);
 	xhci_dbg(xhci, "  Event ring is %sempty\n",
 			(temp & STS_EINT) ? "not " : "");
@@ -163,7 +163,7 @@ static void xhci_print_ports(struct xhci_hcd *xhci)
 		for (j = 0; j < NUM_PORT_REGS; ++j) {
 			xhci_dbg(xhci, "%p port %s reg = 0x%x\n",
 					addr, names[j],
-					(unsigned int) xhci_readl(xhci, addr));
+					(unsigned int) readl(addr));
 			addr++;
 		}
 	}
@@ -177,7 +177,7 @@ void xhci_print_ir_set(struct xhci_hcd *xhci, int set_num)
 	u64 temp_64;
 
 	addr = &ir_set->irq_pending;
-	temp = xhci_readl(xhci, addr);
+	temp = readl(addr);
 	if (temp == XHCI_INIT_VALUE)
 		return;
 
@@ -187,17 +187,17 @@ void xhci_print_ir_set(struct xhci_hcd *xhci, int set_num)
 			(unsigned int)temp);
 
 	addr = &ir_set->irq_control;
-	temp = xhci_readl(xhci, addr);
+	temp = readl(addr);
 	xhci_dbg(xhci, "  %p: ir_set.control = 0x%x\n", addr,
 			(unsigned int)temp);
 
 	addr = &ir_set->erst_size;
-	temp = xhci_readl(xhci, addr);
+	temp = readl(addr);
 	xhci_dbg(xhci, "  %p: ir_set.erst_size = 0x%x\n", addr,
 			(unsigned int)temp);
 
 	addr = &ir_set->rsvd;
-	temp = xhci_readl(xhci, addr);
+	temp = readl(addr);
 	if (temp != XHCI_INIT_VALUE)
 		xhci_dbg(xhci, "  WARN: %p: ir_set.rsvd = 0x%x\n",
 				addr, (unsigned int)temp);
@@ -219,12 +219,12 @@ void xhci_print_run_regs(struct xhci_hcd *xhci)
 	int i;
 
 	xhci_dbg(xhci, "xHCI runtime registers at %p:\n", xhci->run_regs);
-	temp = xhci_readl(xhci, &xhci->run_regs->microframe_index);
+	temp = readl(&xhci->run_regs->microframe_index);
 	xhci_dbg(xhci, "  %p: Microframe index = 0x%x\n",
 			&xhci->run_regs->microframe_index,
 			(unsigned int) temp);
 	for (i = 0; i < 7; ++i) {
-		temp = xhci_readl(xhci, &xhci->run_regs->rsvd[i]);
+		temp = readl(&xhci->run_regs->rsvd[i]);
 		if (temp != XHCI_INIT_VALUE)
 			xhci_dbg(xhci, "  WARN: %p: Rsvd[%i] = 0x%x\n",
 					&xhci->run_regs->rsvd[i],
@@ -266,11 +266,11 @@ void xhci_debug_trb(struct xhci_hcd *xhci, union xhci_trb *trb)
 		xhci_dbg(xhci, "Interrupter target = 0x%x\n",
 			 GET_INTR_TARGET(le32_to_cpu(trb->link.intr_target)));
 		xhci_dbg(xhci, "Cycle bit = %u\n",
-			 (unsigned int) (le32_to_cpu(trb->link.control) & TRB_CYCLE));
+			 le32_to_cpu(trb->link.control) & TRB_CYCLE);
 		xhci_dbg(xhci, "Toggle cycle bit = %u\n",
-			 (unsigned int) (le32_to_cpu(trb->link.control) & LINK_TOGGLE));
+			 le32_to_cpu(trb->link.control) & LINK_TOGGLE);
 		xhci_dbg(xhci, "No Snoop bit = %u\n",
-			 (unsigned int) (le32_to_cpu(trb->link.control) & TRB_NO_SNOOP));
+			 le32_to_cpu(trb->link.control) & TRB_NO_SNOOP);
 		break;
 	case TRB_TYPE(TRB_TRANSFER):
 		address = le64_to_cpu(trb->trans_event.buffer);
@@ -284,9 +284,9 @@ void xhci_debug_trb(struct xhci_hcd *xhci, union xhci_trb *trb)
 		address = le64_to_cpu(trb->event_cmd.cmd_trb);
 		xhci_dbg(xhci, "Command TRB pointer = %llu\n", address);
 		xhci_dbg(xhci, "Completion status = %u\n",
-			 (unsigned int) GET_COMP_CODE(le32_to_cpu(trb->event_cmd.status)));
+			 GET_COMP_CODE(le32_to_cpu(trb->event_cmd.status)));
 		xhci_dbg(xhci, "Flags = 0x%x\n",
-			 (unsigned int) le32_to_cpu(trb->event_cmd.flags));
+			 le32_to_cpu(trb->event_cmd.flags));
 		break;
 	default:
 		xhci_dbg(xhci, "Unknown TRB with TRB type ID %u\n",
@@ -318,10 +318,10 @@ void xhci_debug_segment(struct xhci_hcd *xhci, struct xhci_segment *seg)
 	for (i = 0; i < TRBS_PER_SEGMENT; ++i) {
 		trb = &seg->trbs[i];
 		xhci_dbg(xhci, "@%016llx %08x %08x %08x %08x\n", addr,
-			 (u32)lower_32_bits(le64_to_cpu(trb->link.segment_ptr)),
-			 (u32)upper_32_bits(le64_to_cpu(trb->link.segment_ptr)),
-			 (unsigned int) le32_to_cpu(trb->link.intr_target),
-			 (unsigned int) le32_to_cpu(trb->link.control));
+			 lower_32_bits(le64_to_cpu(trb->link.segment_ptr)),
+			 upper_32_bits(le64_to_cpu(trb->link.segment_ptr)),
+			 le32_to_cpu(trb->link.intr_target),
+			 le32_to_cpu(trb->link.control));
 		addr += sizeof(*trb);
 	}
 }
@@ -402,8 +402,8 @@ void xhci_dbg_erst(struct xhci_hcd *xhci, struct xhci_erst *erst)
 			 addr,
 			 lower_32_bits(le64_to_cpu(entry->seg_addr)),
 			 upper_32_bits(le64_to_cpu(entry->seg_addr)),
-			 (unsigned int) le32_to_cpu(entry->seg_size),
-			 (unsigned int) le32_to_cpu(entry->rsvd));
+			 le32_to_cpu(entry->seg_size),
+			 le32_to_cpu(entry->rsvd));
 		addr += sizeof(*entry);
 	}
 }
@@ -503,11 +503,14 @@ static void xhci_dbg_ep_ctx(struct xhci_hcd *xhci,
 	if (last_ep < 31)
 		last_ep_ctx = last_ep + 1;
 	for (i = 0; i < last_ep_ctx; ++i) {
+		unsigned int epaddr = xhci_get_endpoint_address(i);
 		struct xhci_ep_ctx *ep_ctx = xhci_get_ep_ctx(xhci, ctx, i);
 		dma_addr_t dma = ctx->dma +
 			((unsigned long)ep_ctx - (unsigned long)ctx->bytes);
 
-		xhci_dbg(xhci, "Endpoint %02d Context:\n", i);
+		xhci_dbg(xhci, "%s Endpoint %02d Context (ep_index %02d):\n",
+				usb_endpoint_out(epaddr) ? "OUT" : "IN",
+				epaddr & USB_ENDPOINT_NUMBER_MASK, i);
 		xhci_dbg(xhci, "@%p (virt) @%08llx (dma) %#08x - ep_info\n",
 				&ep_ctx->ep_info,
 				(unsigned long long)dma, ep_ctx->ep_info);
@@ -544,13 +547,17 @@ void xhci_dbg_ctx(struct xhci_hcd *xhci,
 	int i;
 	/* Fields are 32 bits wide, DMA addresses are in bytes */
 	int field_size = 32 / 8;
-	struct xhci_slot_ctx *slot_ctx;
 	dma_addr_t dma = ctx->dma;
 	int csz = HCC_64BYTE_CONTEXT(xhci->hcc_params);
 
 	if (ctx->type == XHCI_CTX_TYPE_INPUT) {
 		struct xhci_input_control_ctx *ctrl_ctx =
 			xhci_get_input_control_ctx(xhci, ctx);
+		if (!ctrl_ctx) {
+			xhci_warn(xhci, "Could not get input context, bad type.\n");
+			return;
+		}
+
 		xhci_dbg(xhci, "@%p (virt) @%08llx (dma) %#08x - drop flags\n",
 			 &ctrl_ctx->drop_flags, (unsigned long long)dma,
 			 ctrl_ctx->drop_flags);
@@ -570,7 +577,20 @@ void xhci_dbg_ctx(struct xhci_hcd *xhci,
 			dbg_rsvd64(xhci, (u64 *)ctrl_ctx, dma);
 	}
 
-	slot_ctx = xhci_get_slot_ctx(xhci, ctx);
 	xhci_dbg_slot_ctx(xhci, ctx);
 	xhci_dbg_ep_ctx(xhci, ctx, last_ep);
+}
+
+void xhci_dbg_trace(struct xhci_hcd *xhci, void (*trace)(struct va_format *),
+			const char *fmt, ...)
+{
+	struct va_format vaf;
+	va_list args;
+
+	va_start(args, fmt);
+	vaf.fmt = fmt;
+	vaf.va = &args;
+	xhci_dbg(xhci, "%pV\n", &vaf);
+	trace(&vaf);
+	va_end(args);
 }

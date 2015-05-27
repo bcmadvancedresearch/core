@@ -21,216 +21,328 @@
 #include <linux/slab.h>
 #include <linux/device.h>
 #include <linux/module.h>
+#include <linux/mfd/syscon.h>
 #include <linux/err.h>
+#include <linux/io.h>
 #include <linux/platform_device.h>
-#include <linux/regulator/machine.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/regmap.h>
 #include <linux/regulator/driver.h>
-#include <linux/regulator/anatop-regulator.h>
+#include <linux/regulator/of_regulator.h>
 
-static int anatop_set_voltage(struct regulator_dev *reg, int min_uV,
-				  int max_uV, unsigned *selector)
+#define LDO_RAMP_UP_UNIT_IN_CYCLES      64 /* 64 cycles per step */
+#define LDO_RAMP_UP_FREQ_IN_MHZ         24 /* cycle based on 24M OSC */
+
+#define LDO_POWER_GATE			0x00
+#define LDO_FET_FULL_ON			0x1f
+
+struct anatop_regulator {
+	const char *name;
+	u32 control_reg;
+	struct regmap *anatop;
+	int vol_bit_shift;
+	int vol_bit_width;
+	u32 delay_reg;
+	int delay_bit_shift;
+	int delay_bit_width;
+	int min_bit_val;
+	int min_voltage;
+	int max_voltage;
+	struct regulator_desc rdesc;
+	struct regulator_init_data *initdata;
+	bool bypass;
+	int sel;
+};
+
+static struct anatop_regulator *vddpu;
+static struct anatop_regulator *vddsoc;
+
+static int anatop_regmap_set_voltage_time_sel(struct regulator_dev *reg,
+	unsigned int old_sel,
+	unsigned int new_sel)
 {
 	struct anatop_regulator *anatop_reg = rdev_get_drvdata(reg);
+	u32 val;
+	int ret = 0;
 
-	if (anatop_reg->rdata->set_voltage)
-		return anatop_reg->rdata->set_voltage(anatop_reg, max_uV);
-	else
-		return -ENOTSUPP;
+	/* check whether need to care about LDO ramp up speed */
+	if (anatop_reg->delay_bit_width && new_sel > old_sel) {
+		/*
+		 * the delay for LDO ramp up time is
+		 * based on the register setting, we need
+		 * to calculate how many steps LDO need to
+		 * ramp up, and how much delay needed. (us)
+		 */
+		regmap_read(anatop_reg->anatop, anatop_reg->delay_reg, &val);
+		val = (val >> anatop_reg->delay_bit_shift) &
+			((1 << anatop_reg->delay_bit_width) - 1);
+		ret = (new_sel - old_sel) * (LDO_RAMP_UP_UNIT_IN_CYCLES <<
+			val) / LDO_RAMP_UP_FREQ_IN_MHZ + 1;
+	}
+
+	return ret;
 }
 
-static int anatop_get_voltage(struct regulator_dev *reg)
+static int anatop_regmap_enable(struct regulator_dev *reg)
 {
 	struct anatop_regulator *anatop_reg = rdev_get_drvdata(reg);
+	int sel;
 
-	if (anatop_reg->rdata->get_voltage)
-		return anatop_reg->rdata->get_voltage(anatop_reg);
-	else
-		return -ENOTSUPP;
+	/*
+	 * The vddpu has to stay at the same voltage level as vddsoc
+	 * whenever it's about to be enabled.
+	 */
+	if (anatop_reg == vddpu && vddsoc)
+		anatop_reg->sel = vddsoc->sel;
+
+	sel = anatop_reg->bypass ? LDO_FET_FULL_ON : anatop_reg->sel;
+	return regulator_set_voltage_sel_regmap(reg, sel);
 }
 
-static int anatop_enable(struct regulator_dev *reg)
+static int anatop_regmap_disable(struct regulator_dev *reg)
 {
-	struct anatop_regulator *anatop_reg = rdev_get_drvdata(reg);
-
-	return anatop_reg->rdata->enable(anatop_reg);
+	return regulator_set_voltage_sel_regmap(reg, LDO_POWER_GATE);
 }
 
-static int anatop_disable(struct regulator_dev *reg)
+static int anatop_regmap_is_enabled(struct regulator_dev *reg)
 {
-	struct anatop_regulator *anatop_reg = rdev_get_drvdata(reg);
-
-	return anatop_reg->rdata->disable(anatop_reg);
+	return regulator_get_voltage_sel_regmap(reg) != LDO_POWER_GATE;
 }
 
-static int anatop_is_enabled(struct regulator_dev *reg)
+static int anatop_regmap_core_set_voltage_sel(struct regulator_dev *reg,
+					      unsigned selector)
+{
+	struct anatop_regulator *anatop_reg = rdev_get_drvdata(reg);
+	int ret;
+
+	if (anatop_reg->bypass || !anatop_regmap_is_enabled(reg)) {
+		anatop_reg->sel = selector;
+		return 0;
+	}
+
+	ret = regulator_set_voltage_sel_regmap(reg, selector);
+	if (!ret)
+		anatop_reg->sel = selector;
+	return ret;
+}
+
+static int anatop_regmap_core_get_voltage_sel(struct regulator_dev *reg)
 {
 	struct anatop_regulator *anatop_reg = rdev_get_drvdata(reg);
 
-	return anatop_reg->rdata->is_enabled(anatop_reg);
+	if (anatop_reg->bypass || !anatop_regmap_is_enabled(reg))
+		return anatop_reg->sel;
+
+	return regulator_get_voltage_sel_regmap(reg);
+}
+
+static int anatop_regmap_get_bypass(struct regulator_dev *reg, bool *enable)
+{
+	struct anatop_regulator *anatop_reg = rdev_get_drvdata(reg);
+	int sel;
+
+	sel = regulator_get_voltage_sel_regmap(reg);
+	if (sel == LDO_FET_FULL_ON)
+		WARN_ON(!anatop_reg->bypass);
+	else if (sel != LDO_POWER_GATE)
+		WARN_ON(anatop_reg->bypass);
+
+	*enable = anatop_reg->bypass;
+	return 0;
+}
+
+static int anatop_regmap_set_bypass(struct regulator_dev *reg, bool enable)
+{
+	struct anatop_regulator *anatop_reg = rdev_get_drvdata(reg);
+	int sel;
+
+	if (enable == anatop_reg->bypass)
+		return 0;
+
+	sel = enable ? LDO_FET_FULL_ON : anatop_reg->sel;
+	anatop_reg->bypass = enable;
+
+	return regulator_set_voltage_sel_regmap(reg, sel);
 }
 
 static struct regulator_ops anatop_rops = {
-	.set_voltage	= anatop_set_voltage,
-	.get_voltage	= anatop_get_voltage,
-	.enable		= anatop_enable,
-	.disable	= anatop_disable,
-	.is_enabled	= anatop_is_enabled,
+	.set_voltage_sel = regulator_set_voltage_sel_regmap,
+	.get_voltage_sel = regulator_get_voltage_sel_regmap,
+	.list_voltage = regulator_list_voltage_linear,
+	.map_voltage = regulator_map_voltage_linear,
 };
 
-static struct regulator_desc anatop_reg_desc[] = {
-	{
-		.name = "vddpu",
-		.id = ANATOP_VDDPU,
-		.ops = &anatop_rops,
-		.irq = 0,
-		.type = REGULATOR_VOLTAGE,
-		.owner = THIS_MODULE
-	},
-	{
-		.name = "vddcore",
-		.id = ANATOP_VDDCORE,
-		.ops = &anatop_rops,
-		.irq = 0,
-		.type = REGULATOR_VOLTAGE,
-		.owner = THIS_MODULE
-	},
-	{
-		.name = "vddsoc",
-		.id = ANATOP_VDDSOC,
-		.ops = &anatop_rops,
-		.irq = 0,
-		.type = REGULATOR_VOLTAGE,
-		.owner = THIS_MODULE
-	},
-	{
-		.name = "vdd2p5",
-		.id = ANATOP_VDD2P5,
-		.ops = &anatop_rops,
-		.irq = 0,
-		.type = REGULATOR_VOLTAGE,
-		.owner = THIS_MODULE
-	},
-	{
-		.name = "vdd1p1",
-		.id = ANATOP_VDD1P1,
-		.ops = &anatop_rops,
-		.irq = 0,
-		.type = REGULATOR_VOLTAGE,
-		.owner = THIS_MODULE
-	},
-	{
-		.name = "vdd3p0",
-		.id = ANATOP_VDD3P0,
-		.ops = &anatop_rops,
-		.irq = 0,
-		.type = REGULATOR_VOLTAGE,
-		.owner = THIS_MODULE
-	},
+static struct regulator_ops anatop_core_rops = {
+	.enable = anatop_regmap_enable,
+	.disable = anatop_regmap_disable,
+	.is_enabled = anatop_regmap_is_enabled,
+	.set_voltage_sel = anatop_regmap_core_set_voltage_sel,
+	.set_voltage_time_sel = anatop_regmap_set_voltage_time_sel,
+	.get_voltage_sel = anatop_regmap_core_get_voltage_sel,
+	.list_voltage = regulator_list_voltage_linear,
+	.map_voltage = regulator_map_voltage_linear,
+	.get_bypass = anatop_regmap_get_bypass,
+	.set_bypass = anatop_regmap_set_bypass,
 };
 
-int anatop_regulator_probe(struct platform_device *pdev)
+static int anatop_regulator_probe(struct platform_device *pdev)
 {
+	struct device *dev = &pdev->dev;
+	struct device_node *np = dev->of_node;
+	struct device_node *anatop_np;
 	struct regulator_desc *rdesc;
 	struct regulator_dev *rdev;
 	struct anatop_regulator *sreg;
 	struct regulator_init_data *initdata;
+	struct regulator_config config = { };
+	int ret = 0;
+	u32 val;
 
-	sreg = platform_get_drvdata(pdev);
-	initdata = pdev->dev.platform_data;
-	sreg->cur_current = 0;
-	sreg->next_current = 0;
-	sreg->cur_voltage = 0;
+	initdata = of_get_regulator_init_data(dev, np);
+	sreg = devm_kzalloc(dev, sizeof(*sreg), GFP_KERNEL);
+	if (!sreg)
+		return -ENOMEM;
+	sreg->initdata = initdata;
+	sreg->name = of_get_property(np, "regulator-name", NULL);
+	rdesc = &sreg->rdesc;
+	rdesc->name = sreg->name;
+	rdesc->type = REGULATOR_VOLTAGE;
+	rdesc->owner = THIS_MODULE;
 
-	init_waitqueue_head(&sreg->wait_q);
-	spin_lock_init(&sreg->lock);
+	if (strcmp(sreg->name, "vddpu") == 0)
+		vddpu = sreg;
+	else if (strcmp(sreg->name, "vddsoc") == 0)
+		vddsoc = sreg;
 
-	if (pdev->id > ANATOP_SUPPLY_NUM) {
-		rdesc = kzalloc(sizeof(struct regulator_desc), GFP_KERNEL);
-		memcpy(rdesc, &anatop_reg_desc[ANATOP_SUPPLY_NUM],
-			sizeof(struct regulator_desc));
-		rdesc->name = kstrdup(sreg->rdata->name, GFP_KERNEL);
-	} else
-		rdesc = &anatop_reg_desc[pdev->id];
+	anatop_np = of_get_parent(np);
+	if (!anatop_np)
+		return -ENODEV;
+	sreg->anatop = syscon_node_to_regmap(anatop_np);
+	of_node_put(anatop_np);
+	if (IS_ERR(sreg->anatop))
+		return PTR_ERR(sreg->anatop);
 
-	pr_debug("probing regulator %s %s %d\n",
-			sreg->rdata->name,
-			rdesc->name,
-			pdev->id);
+	ret = of_property_read_u32(np, "anatop-reg-offset",
+				   &sreg->control_reg);
+	if (ret) {
+		dev_err(dev, "no anatop-reg-offset property set\n");
+		return ret;
+	}
+	ret = of_property_read_u32(np, "anatop-vol-bit-width",
+				   &sreg->vol_bit_width);
+	if (ret) {
+		dev_err(dev, "no anatop-vol-bit-width property set\n");
+		return ret;
+	}
+	ret = of_property_read_u32(np, "anatop-vol-bit-shift",
+				   &sreg->vol_bit_shift);
+	if (ret) {
+		dev_err(dev, "no anatop-vol-bit-shift property set\n");
+		return ret;
+	}
+	ret = of_property_read_u32(np, "anatop-min-bit-val",
+				   &sreg->min_bit_val);
+	if (ret) {
+		dev_err(dev, "no anatop-min-bit-val property set\n");
+		return ret;
+	}
+	ret = of_property_read_u32(np, "anatop-min-voltage",
+				   &sreg->min_voltage);
+	if (ret) {
+		dev_err(dev, "no anatop-min-voltage property set\n");
+		return ret;
+	}
+	ret = of_property_read_u32(np, "anatop-max-voltage",
+				   &sreg->max_voltage);
+	if (ret) {
+		dev_err(dev, "no anatop-max-voltage property set\n");
+		return ret;
+	}
+
+	/* read LDO ramp up setting, only for core reg */
+	of_property_read_u32(np, "anatop-delay-reg-offset",
+			     &sreg->delay_reg);
+	of_property_read_u32(np, "anatop-delay-bit-width",
+			     &sreg->delay_bit_width);
+	of_property_read_u32(np, "anatop-delay-bit-shift",
+			     &sreg->delay_bit_shift);
+
+	rdesc->n_voltages = (sreg->max_voltage - sreg->min_voltage) / 25000 + 1
+			    + sreg->min_bit_val;
+	rdesc->min_uV = sreg->min_voltage;
+	rdesc->uV_step = 25000;
+	rdesc->linear_min_sel = sreg->min_bit_val;
+	rdesc->vsel_reg = sreg->control_reg;
+	rdesc->vsel_mask = ((1 << sreg->vol_bit_width) - 1) <<
+			   sreg->vol_bit_shift;
+
+	config.dev = &pdev->dev;
+	config.init_data = initdata;
+	config.driver_data = sreg;
+	config.of_node = pdev->dev.of_node;
+	config.regmap = sreg->anatop;
+
+	/* Only core regulators have the ramp up delay configuration. */
+	if (sreg->control_reg && sreg->delay_bit_width) {
+		rdesc->ops = &anatop_core_rops;
+
+		ret = regmap_read(config.regmap, rdesc->vsel_reg, &val);
+		if (ret) {
+			dev_err(dev, "failed to read initial state\n");
+			return ret;
+		}
+
+		sreg->sel = (val & rdesc->vsel_mask) >> sreg->vol_bit_shift;
+		if (sreg->sel == LDO_FET_FULL_ON) {
+			sreg->sel = 0;
+			sreg->bypass = true;
+		}
+	} else {
+		rdesc->ops = &anatop_rops;
+	}
 
 	/* register regulator */
-	rdev = regulator_register(rdesc, &pdev->dev,
-				  initdata, sreg);
-
+	rdev = devm_regulator_register(dev, rdesc, &config);
 	if (IS_ERR(rdev)) {
-		dev_err(&pdev->dev, "failed to register %s\n",
+		dev_err(dev, "failed to register %s\n",
 			rdesc->name);
 		return PTR_ERR(rdev);
 	}
 
-	return 0;
-}
-
-
-int anatop_regulator_remove(struct platform_device *pdev)
-{
-	struct regulator_dev *rdev = platform_get_drvdata(pdev);
-
-	regulator_unregister(rdev);
+	platform_set_drvdata(pdev, rdev);
 
 	return 0;
-
 }
 
-int anatop_register_regulator(
-		struct anatop_regulator *reg_data, int reg,
-			      struct regulator_init_data *initdata)
-{
-	struct platform_device *pdev;
-	int ret;
-
-	pdev = platform_device_alloc("anatop_reg", reg);
-	if (!pdev)
-		return -ENOMEM;
-
-	pdev->dev.platform_data = initdata;
-
-	platform_set_drvdata(pdev, reg_data);
-	ret = platform_device_add(pdev);
-
-	if (ret != 0) {
-		pr_debug("Failed to register regulator %d: %d\n",
-			reg, ret);
-		platform_device_del(pdev);
-	}
-	pr_debug("register regulator %s, %d: %d\n",
-			reg_data->rdata->name, reg, ret);
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(anatop_register_regulator);
-
-struct platform_driver anatop_reg = {
-	.driver = {
-		.name	= "anatop_reg",
-	},
-	.probe	= anatop_regulator_probe,
-	.remove	= anatop_regulator_remove,
+static struct of_device_id of_anatop_regulator_match_tbl[] = {
+	{ .compatible = "fsl,anatop-regulator", },
+	{ /* end */ }
 };
 
-int anatop_regulator_init(void)
-{
-	return platform_driver_register(&anatop_reg);
-}
+static struct platform_driver anatop_regulator_driver = {
+	.driver = {
+		.name	= "anatop_regulator",
+		.owner  = THIS_MODULE,
+		.of_match_table = of_anatop_regulator_match_tbl,
+	},
+	.probe	= anatop_regulator_probe,
+};
 
-void anatop_regulator_exit(void)
+static int __init anatop_regulator_init(void)
 {
-	platform_driver_unregister(&anatop_reg);
+	return platform_driver_register(&anatop_regulator_driver);
 }
-
 postcore_initcall(anatop_regulator_init);
+
+static void __exit anatop_regulator_exit(void)
+{
+	platform_driver_unregister(&anatop_regulator_driver);
+}
 module_exit(anatop_regulator_exit);
 
-MODULE_AUTHOR("Freescale Semiconductor, Inc.");
+MODULE_AUTHOR("Nancy Chen <Nancy.Chen@freescale.com>");
+MODULE_AUTHOR("Ying-Chun Liu (PaulLiu) <paul.liu@linaro.org>");
 MODULE_DESCRIPTION("ANATOP Regulator driver");
-MODULE_LICENSE("GPL");
-
+MODULE_LICENSE("GPL v2");
+MODULE_ALIAS("platform:anatop_regulator");

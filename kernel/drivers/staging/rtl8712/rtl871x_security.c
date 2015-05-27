@@ -28,6 +28,20 @@
 
 #define  _RTL871X_SECURITY_C_
 
+#include <linux/compiler.h>
+#include <linux/kernel.h>
+#include <linux/errno.h>
+#include <linux/slab.h>
+#include <linux/module.h>
+#include <linux/kref.h>
+#include <linux/netdevice.h>
+#include <linux/skbuff.h>
+#include <linux/circ_buf.h>
+#include <linux/uaccess.h>
+#include <asm/byteorder.h>
+#include <linux/atomic.h>
+#include <linux/semaphore.h>
+
 #include "osdep_service.h"
 #include "drv_types.h"
 #include "wifi.h"
@@ -43,7 +57,7 @@ struct arc4context {
 	u8 state[256];
 };
 
-static void arcfour_init(struct arc4context *parc4ctx, u8 * key, u32 key_len)
+static void arcfour_init(struct arc4context *parc4ctx, u8 *key, u32 key_len)
 {
 	u32	t, u;
 	u32	keyindex;
@@ -273,7 +287,7 @@ static void secmicclear(struct mic_data *pmicdata)
 	pmicdata->M = 0;
 }
 
-void r8712_secmicsetkey(struct mic_data *pmicdata, u8 * key)
+void r8712_secmicsetkey(struct mic_data *pmicdata, u8 *key)
 {
 	/* Set the key */
 	pmicdata->K0 = secmicgetuint32(key);
@@ -305,7 +319,7 @@ static void secmicappendbyte(struct mic_data *pmicdata, u8 b)
 	}
 }
 
-void r8712_secmicappend(struct mic_data *pmicdata, u8 * src, u32 nbytes)
+void r8712_secmicappend(struct mic_data *pmicdata, u8 *src, u32 nbytes)
 {
 	/* This is simple */
 	while (nbytes > 0) {
@@ -820,7 +834,7 @@ static void mix_column(u8 *in, u8 *out)
 	u8 temp[4];
 	u8 tempb[4];
 
-	for (i = 0 ; i < 4; i++) {
+	for (i = 0; i < 4; i++) {
 		if ((in[i] & 0x80) == 0x80)
 			add1b[i] = 0x1b;
 		else
@@ -1172,7 +1186,7 @@ u32 r8712_aes_encrypt(struct _adapter *padapter, u8 *pxmitframe)
 					length = pxmitpriv->frag_len -
 						 pattrib->hdrlen -
 						 pattrib->iv_len -
-						 pattrib->icv_len ;
+						 pattrib->icv_len;
 					aes_cipher(prwskey, pattrib->
 						   hdrlen, pframe, length);
 					pframe += pxmitpriv->frag_len;
@@ -1300,7 +1314,7 @@ static sint aes_decipher(u8 *key, uint	hdrlen,
 		bitwise_xor(aes_out, padded_buffer, chain_buffer);
 		aes128k128d(key, chain_buffer, aes_out);
 	}
-	for (j = 0 ; j < 8; j++)
+	for (j = 0; j < 8; j++)
 		mic[j] = aes_out[j];
 	/* Insert MIC into payload */
 	for (j = 0; j < 8; j++)
@@ -1353,7 +1367,7 @@ u32 r8712_aes_decrypt(struct _adapter *padapter, u8 *precvframe)
 					   precvframe)->u.hdr.attrib;
 	struct	security_priv *psecuritypriv = &padapter->securitypriv;
 
-	pframe = (unsigned char *)((union recv_frame*)precvframe)->
+	pframe = (unsigned char *)((union recv_frame *)precvframe)->
 		 u.hdr.rx_data;
 	/* 4 start to encrypt each fragment */
 	if ((prxattrib->encrypt == _AES_)) {

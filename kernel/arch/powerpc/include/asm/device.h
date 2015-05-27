@@ -28,13 +28,24 @@ struct dev_archdata {
 		void		*iommu_table_base;
 	} dma_data;
 
+#ifdef CONFIG_IOMMU_API
+	void			*iommu_domain;
+#endif
 #ifdef CONFIG_SWIOTLB
 	dma_addr_t		max_direct_dma_addr;
+#endif
+#ifdef CONFIG_EEH
+	struct eeh_dev		*edev;
+#endif
+#ifdef CONFIG_FAIL_IOMMU
+	int fail_iommu;
 #endif
 };
 
 struct pdev_archdata {
 	u64 dma_mask;
 };
+
+#define ARCH_HAS_DMA_GET_REQUIRED_MASK
 
 #endif /* _ASM_POWERPC_DEVICE_H */

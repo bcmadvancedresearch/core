@@ -40,8 +40,6 @@
 #include <linux/compiler.h>
 #include <asm/page.h>
 
-#include <xen/xen.h>
-
 #define build_mmio_read(name, size, type, reg, barrier) \
 static inline type name(const volatile void __iomem *addr) \
 { type ret; asm volatile("mov" size " %1,%0":reg (ret) \
@@ -239,7 +237,7 @@ memcpy_toio(volatile void __iomem *dst, const void *src, size_t count)
 
 static inline void flush_write_buffers(void)
 {
-#if defined(CONFIG_X86_OOSTORE) || defined(CONFIG_X86_PPRO_FENCE)
+#if defined(CONFIG_X86_PPRO_FENCE)
 	asm volatile("lock; addl $0,0(%%esp)": : :"memory");
 #endif
 }
@@ -334,6 +332,7 @@ extern void fixup_early_ioremap(void);
 extern bool is_early_ioremap_ptep(pte_t *ptep);
 
 #ifdef CONFIG_XEN
+#include <xen/xen.h>
 struct bio_vec;
 
 extern bool xen_biovec_phys_mergeable(const struct bio_vec *vec1,
@@ -345,5 +344,12 @@ extern bool xen_biovec_phys_mergeable(const struct bio_vec *vec1,
 #endif	/* CONFIG_XEN */
 
 #define IO_SPACE_LIMIT 0xffff
+
+#ifdef CONFIG_MTRR
+extern int __must_check arch_phys_wc_add(unsigned long base,
+					 unsigned long size);
+extern void arch_phys_wc_del(int handle);
+#define arch_phys_wc_add arch_phys_wc_add
+#endif
 
 #endif /* _ASM_X86_IO_H */

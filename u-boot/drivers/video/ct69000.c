@@ -1,26 +1,10 @@
 /* ported from ctfb.c (linux kernel):
- * Created in Jan - July 2000 by Thomas Höhenleitner <th@visuelle-maschinen.de>
+ * Created in Jan - July 2000 by Thomas HÃ¶henleitner <th@visuelle-maschinen.de>
  *
  * Ported to U-Boot:
  * (C) Copyright 2002 Denis Peter, MPL AG Switzerland
  *
- * See file CREDITS for list of people who contributed to this
- * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 #include <common.h>
@@ -35,9 +19,11 @@
 #undef VGA_DEBUG
 #undef VGA_DUMP_REG
 #ifdef VGA_DEBUG
-#define	PRINTF(fmt,args...)	printf (fmt ,##args)
+#undef _DEBUG
+#define _DEBUG  1
 #else
-#define PRINTF(fmt,args...)
+#undef _DEBUG
+#define _DEBUG  0
 #endif
 
 /* Macros */
@@ -626,25 +612,25 @@ FindBestPQFittingMN (unsigned int p, unsigned int q, unsigned int mnmin,
 
 /* that is the hardware < 69000 we have to manage
  +---------+  +-------------------+  +----------------------+  +--+
- | REFCLK  |__|NTSC Divisor Select|__|FVCO Reference Divisor|__|÷N|__
- | 14.3MHz |  |(NTSCDS) (÷1, ÷5)  |  |Select (RDS) (÷1, ÷4) |  |  |  |
+ | REFCLK  |__|NTSC Divisor Select|__|FVCO Reference Divisor|__|Ã·N|__
+ | 14.3MHz |  |(NTSCDS) (Ã·1, Ã·5)  |  |Select (RDS) (Ã·1, Ã·4) |  |  |  |
  +---------+  +-------------------+  +----------------------+  +--+  |
   ___________________________________________________________________|
  |
  |                                    fvco                      fout
  | +--------+  +------------+  +-----+     +-------------------+   +----+
  +-| Phase  |__|Charge Pump |__| VCO |_____|Post Divisor (PD)  |___|CLK |--->
- +-| Detect |  |& Filter VCO|  |     |  |  |÷1, 2, 4, 8, 16, 32|   |    |
+ +-| Detect |  |& Filter VCO|  |     |  |  |Ã·1, 2, 4, 8, 16, 32|   |    |
  | +--------+  +------------+  +-----+  |  +-------------------+   +----+
  |                                      |
  |    +--+   +---------------+          |
- |____|÷M|___|VCO Loop Divide|__________|
-      |  |   |(VLD)(÷4, ÷16) |
+ |____|Ã·M|___|VCO Loop Divide|__________|
+      |  |   |(VLD)(Ã·4, Ã·16) |
       +--+   +---------------+
 ****************************************************************************
   that is the hardware >= 69000 we have to manage
  +---------+  +--+
- | REFCLK  |__|÷N|__
+ | REFCLK  |__|Ã·N|__
  | 14.3MHz |  |  |  |
  +---------+  +--+  |
   __________________|
@@ -652,12 +638,12 @@ FindBestPQFittingMN (unsigned int p, unsigned int q, unsigned int mnmin,
  |                                    fvco                      fout
  | +--------+  +------------+  +-----+     +-------------------+   +----+
  +-| Phase  |__|Charge Pump |__| VCO |_____|Post Divisor (PD)  |___|CLK |--->
- +-| Detect |  |& Filter VCO|  |     |  |  |÷1, 2, 4, 8, 16, 32|   |    |
+ +-| Detect |  |& Filter VCO|  |     |  |  |Ã·1, 2, 4, 8, 16, 32|   |    |
  | +--------+  +------------+  +-----+  |  +-------------------+   +----+
  |                                      |
  |    +--+   +---------------+          |
- |____|÷M|___|VCO Loop Divide|__________|
-      |  |   |(VLD)(÷1, ÷4)  |
+ |____|Ã·M|___|VCO Loop Divide|__________|
+      |  |   |(VLD)(Ã·1, Ã·4)  |
       +--+   +---------------+
 
 
@@ -740,7 +726,7 @@ FindAndSetPllParamIntoXrRegs (unsigned int pixelclock,
 	}
 	m += param->mn_diff;
 	n += param->mn_diff;
-	PRINTF ("VCO %d, pd %d, m %d n %d vld %d \n", fvco, pd, m, n, vld);
+	debug("VCO %d, pd %d, m %d n %d vld %d\n", fvco, pd, m, n, vld);
 	xr_cb = ((0x7 & PD) << 4) | (vld == param->vld_set ? 0x04 : 0);
 	/* All four of the registers used for dot clock 2 (XRC8 - XRCB) must be
 	 * written, and in order from XRC8 to XRCB, before the hardware will
@@ -751,7 +737,7 @@ FindAndSetPllParamIntoXrRegs (unsigned int pixelclock,
 	ctWrite_i (CT_XR_O, 0xca, 0);	/* because of a hw bug I guess, but we write */
 	ctWrite_i (CT_XR_O, 0xcb, xr_cb);	/* 0 to it for savety */
 	new_pixclock = ReadPixClckFromXrRegsBack (param);
-	PRINTF ("pixelclock.set = %d, pixelclock.real = %d \n",
+	debug("pixelclock.set = %d, pixelclock.real = %d\n",
 		pixelclock, new_pixclock);
 }
 
@@ -1119,7 +1105,7 @@ video_hw_init (void)
 		pGD->dprBase &= 0xfffff000;
 		pGD->dprBase += 0x00001000;
 	}
-	PRINTF ("Cursor Start %x Pattern Start %x\n", pGD->dprBase,
+	debug("Cursor Start %x Pattern Start %x\n", pGD->dprBase,
 		PATTERN_ADR);
 	pGD->vprBase = pci_mem_base;	/* Dummy */
 	pGD->cprBase = pci_mem_base;	/* Dummy */

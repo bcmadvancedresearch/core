@@ -21,10 +21,13 @@
 #include <linux/ipv6.h>
 #include <linux/if_vlan.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 
 #include <net/pkt_cls.h>
 #include <net/ip.h>
 #include <net/route.h>
+#include <net/flow_keys.h>
+
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 #include <net/netfilter/nf_conntrack.h>
 #endif
@@ -53,11 +56,6 @@ struct flow_filter {
 	u32			hashrnd;
 };
 
-static const struct tcf_ext_map flow_ext_map = {
-	.action	= TCA_FLOW_ACT,
-	.police	= TCA_FLOW_POLICE,
-};
-
 static inline u32 addr_fold(void *addr)
 {
 	unsigned long a = (unsigned long)addr;
@@ -65,132 +63,37 @@ static inline u32 addr_fold(void *addr)
 	return (a & 0xFFFFFFFF) ^ (BITS_PER_LONG > 32 ? a >> 32 : 0);
 }
 
-static u32 flow_get_src(struct sk_buff *skb)
+static u32 flow_get_src(const struct sk_buff *skb, const struct flow_keys *flow)
 {
-	switch (skb->protocol) {
-	case htons(ETH_P_IP):
-		if (pskb_network_may_pull(skb, sizeof(struct iphdr)))
-			return ntohl(ip_hdr(skb)->saddr);
-		break;
-	case htons(ETH_P_IPV6):
-		if (pskb_network_may_pull(skb, sizeof(struct ipv6hdr)))
-			return ntohl(ipv6_hdr(skb)->saddr.s6_addr32[3]);
-		break;
-	}
-
+	if (flow->src)
+		return ntohl(flow->src);
 	return addr_fold(skb->sk);
 }
 
-static u32 flow_get_dst(struct sk_buff *skb)
+static u32 flow_get_dst(const struct sk_buff *skb, const struct flow_keys *flow)
 {
-	switch (skb->protocol) {
-	case htons(ETH_P_IP):
-		if (pskb_network_may_pull(skb, sizeof(struct iphdr)))
-			return ntohl(ip_hdr(skb)->daddr);
-		break;
-	case htons(ETH_P_IPV6):
-		if (pskb_network_may_pull(skb, sizeof(struct ipv6hdr)))
-			return ntohl(ipv6_hdr(skb)->daddr.s6_addr32[3]);
-		break;
-	}
-
+	if (flow->dst)
+		return ntohl(flow->dst);
 	return addr_fold(skb_dst(skb)) ^ (__force u16)skb->protocol;
 }
 
-static u32 flow_get_proto(struct sk_buff *skb)
+static u32 flow_get_proto(const struct sk_buff *skb, const struct flow_keys *flow)
 {
-	switch (skb->protocol) {
-	case htons(ETH_P_IP):
-		return pskb_network_may_pull(skb, sizeof(struct iphdr)) ?
-		       ip_hdr(skb)->protocol : 0;
-	case htons(ETH_P_IPV6):
-		return pskb_network_may_pull(skb, sizeof(struct ipv6hdr)) ?
-		       ipv6_hdr(skb)->nexthdr : 0;
-	default:
-		return 0;
-	}
+	return flow->ip_proto;
 }
 
-static u32 flow_get_proto_src(struct sk_buff *skb)
+static u32 flow_get_proto_src(const struct sk_buff *skb, const struct flow_keys *flow)
 {
-	switch (skb->protocol) {
-	case htons(ETH_P_IP): {
-		struct iphdr *iph;
-		int poff;
-
-		if (!pskb_network_may_pull(skb, sizeof(*iph)))
-			break;
-		iph = ip_hdr(skb);
-		if (iph->frag_off & htons(IP_MF | IP_OFFSET))
-			break;
-		poff = proto_ports_offset(iph->protocol);
-		if (poff >= 0 &&
-		    pskb_network_may_pull(skb, iph->ihl * 4 + 2 + poff)) {
-			iph = ip_hdr(skb);
-			return ntohs(*(__be16 *)((void *)iph + iph->ihl * 4 +
-						 poff));
-		}
-		break;
-	}
-	case htons(ETH_P_IPV6): {
-		struct ipv6hdr *iph;
-		int poff;
-
-		if (!pskb_network_may_pull(skb, sizeof(*iph)))
-			break;
-		iph = ipv6_hdr(skb);
-		poff = proto_ports_offset(iph->nexthdr);
-		if (poff >= 0 &&
-		    pskb_network_may_pull(skb, sizeof(*iph) + poff + 2)) {
-			iph = ipv6_hdr(skb);
-			return ntohs(*(__be16 *)((void *)iph + sizeof(*iph) +
-						 poff));
-		}
-		break;
-	}
-	}
+	if (flow->ports)
+		return ntohs(flow->port16[0]);
 
 	return addr_fold(skb->sk);
 }
 
-static u32 flow_get_proto_dst(struct sk_buff *skb)
+static u32 flow_get_proto_dst(const struct sk_buff *skb, const struct flow_keys *flow)
 {
-	switch (skb->protocol) {
-	case htons(ETH_P_IP): {
-		struct iphdr *iph;
-		int poff;
-
-		if (!pskb_network_may_pull(skb, sizeof(*iph)))
-			break;
-		iph = ip_hdr(skb);
-		if (iph->frag_off & htons(IP_MF | IP_OFFSET))
-			break;
-		poff = proto_ports_offset(iph->protocol);
-		if (poff >= 0 &&
-		    pskb_network_may_pull(skb, iph->ihl * 4 + 4 + poff)) {
-			iph = ip_hdr(skb);
-			return ntohs(*(__be16 *)((void *)iph + iph->ihl * 4 +
-						 2 + poff));
-		}
-		break;
-	}
-	case htons(ETH_P_IPV6): {
-		struct ipv6hdr *iph;
-		int poff;
-
-		if (!pskb_network_may_pull(skb, sizeof(*iph)))
-			break;
-		iph = ipv6_hdr(skb);
-		poff = proto_ports_offset(iph->nexthdr);
-		if (poff >= 0 &&
-		    pskb_network_may_pull(skb, sizeof(*iph) + poff + 4)) {
-			iph = ipv6_hdr(skb);
-			return ntohs(*(__be16 *)((void *)iph + sizeof(*iph) +
-						 poff + 2));
-		}
-		break;
-	}
-	}
+	if (flow->ports)
+		return ntohs(flow->port16[1]);
 
 	return addr_fold(skb_dst(skb)) ^ (__force u16)skb->protocol;
 }
@@ -223,7 +126,7 @@ static u32 flow_get_nfct(const struct sk_buff *skb)
 #define CTTUPLE(skb, member)						\
 ({									\
 	enum ip_conntrack_info ctinfo;					\
-	struct nf_conn *ct = nf_ct_get(skb, &ctinfo);			\
+	const struct nf_conn *ct = nf_ct_get(skb, &ctinfo);		\
 	if (ct == NULL)							\
 		goto fallback;						\
 	ct->tuplehash[CTINFO2DIR(ctinfo)].tuple.member;			\
@@ -236,7 +139,7 @@ static u32 flow_get_nfct(const struct sk_buff *skb)
 })
 #endif
 
-static u32 flow_get_nfct_src(struct sk_buff *skb)
+static u32 flow_get_nfct_src(const struct sk_buff *skb, const struct flow_keys *flow)
 {
 	switch (skb->protocol) {
 	case htons(ETH_P_IP):
@@ -245,10 +148,10 @@ static u32 flow_get_nfct_src(struct sk_buff *skb)
 		return ntohl(CTTUPLE(skb, src.u3.ip6[3]));
 	}
 fallback:
-	return flow_get_src(skb);
+	return flow_get_src(skb, flow);
 }
 
-static u32 flow_get_nfct_dst(struct sk_buff *skb)
+static u32 flow_get_nfct_dst(const struct sk_buff *skb, const struct flow_keys *flow)
 {
 	switch (skb->protocol) {
 	case htons(ETH_P_IP):
@@ -257,21 +160,21 @@ static u32 flow_get_nfct_dst(struct sk_buff *skb)
 		return ntohl(CTTUPLE(skb, dst.u3.ip6[3]));
 	}
 fallback:
-	return flow_get_dst(skb);
+	return flow_get_dst(skb, flow);
 }
 
-static u32 flow_get_nfct_proto_src(struct sk_buff *skb)
+static u32 flow_get_nfct_proto_src(const struct sk_buff *skb, const struct flow_keys *flow)
 {
 	return ntohs(CTTUPLE(skb, src.u.all));
 fallback:
-	return flow_get_proto_src(skb);
+	return flow_get_proto_src(skb, flow);
 }
 
-static u32 flow_get_nfct_proto_dst(struct sk_buff *skb)
+static u32 flow_get_nfct_proto_dst(const struct sk_buff *skb, const struct flow_keys *flow)
 {
 	return ntohs(CTTUPLE(skb, dst.u.all));
 fallback:
-	return flow_get_proto_dst(skb);
+	return flow_get_proto_dst(skb, flow);
 }
 
 static u32 flow_get_rtclassid(const struct sk_buff *skb)
@@ -285,15 +188,19 @@ static u32 flow_get_rtclassid(const struct sk_buff *skb)
 
 static u32 flow_get_skuid(const struct sk_buff *skb)
 {
-	if (skb->sk && skb->sk->sk_socket && skb->sk->sk_socket->file)
-		return skb->sk->sk_socket->file->f_cred->fsuid;
+	if (skb->sk && skb->sk->sk_socket && skb->sk->sk_socket->file) {
+		kuid_t skuid = skb->sk->sk_socket->file->f_cred->fsuid;
+		return from_kuid(&init_user_ns, skuid);
+	}
 	return 0;
 }
 
 static u32 flow_get_skgid(const struct sk_buff *skb)
 {
-	if (skb->sk && skb->sk->sk_socket && skb->sk->sk_socket->file)
-		return skb->sk->sk_socket->file->f_cred->fsgid;
+	if (skb->sk && skb->sk->sk_socket && skb->sk->sk_socket->file) {
+		kgid_t skgid = skb->sk->sk_socket->file->f_cred->fsgid;
+		return from_kgid(&init_user_ns, skgid);
+	}
 	return 0;
 }
 
@@ -308,22 +215,22 @@ static u32 flow_get_vlan_tag(const struct sk_buff *skb)
 
 static u32 flow_get_rxhash(struct sk_buff *skb)
 {
-	return skb_get_rxhash(skb);
+	return skb_get_hash(skb);
 }
 
-static u32 flow_key_get(struct sk_buff *skb, int key)
+static u32 flow_key_get(struct sk_buff *skb, int key, struct flow_keys *flow)
 {
 	switch (key) {
 	case FLOW_KEY_SRC:
-		return flow_get_src(skb);
+		return flow_get_src(skb, flow);
 	case FLOW_KEY_DST:
-		return flow_get_dst(skb);
+		return flow_get_dst(skb, flow);
 	case FLOW_KEY_PROTO:
-		return flow_get_proto(skb);
+		return flow_get_proto(skb, flow);
 	case FLOW_KEY_PROTO_SRC:
-		return flow_get_proto_src(skb);
+		return flow_get_proto_src(skb, flow);
 	case FLOW_KEY_PROTO_DST:
-		return flow_get_proto_dst(skb);
+		return flow_get_proto_dst(skb, flow);
 	case FLOW_KEY_IIF:
 		return flow_get_iif(skb);
 	case FLOW_KEY_PRIORITY:
@@ -333,13 +240,13 @@ static u32 flow_key_get(struct sk_buff *skb, int key)
 	case FLOW_KEY_NFCT:
 		return flow_get_nfct(skb);
 	case FLOW_KEY_NFCT_SRC:
-		return flow_get_nfct_src(skb);
+		return flow_get_nfct_src(skb, flow);
 	case FLOW_KEY_NFCT_DST:
-		return flow_get_nfct_dst(skb);
+		return flow_get_nfct_dst(skb, flow);
 	case FLOW_KEY_NFCT_PROTO_SRC:
-		return flow_get_nfct_proto_src(skb);
+		return flow_get_nfct_proto_src(skb, flow);
 	case FLOW_KEY_NFCT_PROTO_DST:
-		return flow_get_nfct_proto_dst(skb);
+		return flow_get_nfct_proto_dst(skb, flow);
 	case FLOW_KEY_RTCLASSID:
 		return flow_get_rtclassid(skb);
 	case FLOW_KEY_SKUID:
@@ -356,7 +263,17 @@ static u32 flow_key_get(struct sk_buff *skb, int key)
 	}
 }
 
-static int flow_classify(struct sk_buff *skb, struct tcf_proto *tp,
+#define FLOW_KEYS_NEEDED ((1 << FLOW_KEY_SRC) | 		\
+			  (1 << FLOW_KEY_DST) |			\
+			  (1 << FLOW_KEY_PROTO) |		\
+			  (1 << FLOW_KEY_PROTO_SRC) |		\
+			  (1 << FLOW_KEY_PROTO_DST) | 		\
+			  (1 << FLOW_KEY_NFCT_SRC) |		\
+			  (1 << FLOW_KEY_NFCT_DST) |		\
+			  (1 << FLOW_KEY_NFCT_PROTO_SRC) |	\
+			  (1 << FLOW_KEY_NFCT_PROTO_DST))
+
+static int flow_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 			 struct tcf_result *res)
 {
 	struct flow_head *head = tp->root;
@@ -367,17 +284,20 @@ static int flow_classify(struct sk_buff *skb, struct tcf_proto *tp,
 	int r;
 
 	list_for_each_entry(f, &head->filters, list) {
-		u32 keys[f->nkeys];
+		u32 keys[FLOW_KEY_MAX + 1];
+		struct flow_keys flow_keys;
 
 		if (!tcf_em_tree_match(skb, &f->ematches, NULL))
 			continue;
 
 		keymask = f->keymask;
+		if (keymask & FLOW_KEYS_NEEDED)
+			skb_flow_dissect(skb, &flow_keys);
 
 		for (n = 0; n < f->nkeys; n++) {
 			key = ffs(keymask) - 1;
 			keymask &= ~(1 << key);
-			keys[n] = flow_key_get(skb, key);
+			keys[n] = flow_key_get(skb, key, &flow_keys);
 		}
 
 		if (f->mode == FLOW_MODE_HASH)
@@ -426,7 +346,8 @@ static const struct nla_policy flow_policy[TCA_FLOW_MAX + 1] = {
 	[TCA_FLOW_PERTURB]	= { .type = NLA_U32 },
 };
 
-static int flow_change(struct tcf_proto *tp, unsigned long base,
+static int flow_change(struct net *net, struct sk_buff *in_skb,
+		       struct tcf_proto *tp, unsigned long base,
 		       u32 handle, struct nlattr **tca,
 		       unsigned long *arg)
 {
@@ -465,9 +386,14 @@ static int flow_change(struct tcf_proto *tp, unsigned long base,
 
 		if (fls(keymask) - 1 > FLOW_KEY_MAX)
 			return -EOPNOTSUPP;
+
+		if ((keymask & (FLOW_KEY_SKUID|FLOW_KEY_SKGID)) &&
+		    sk_user_ns(NETLINK_CB(in_skb).sk) != &init_user_ns)
+			return -EOPNOTSUPP;
 	}
 
-	err = tcf_exts_validate(tp, tb, tca[TCA_RATE], &e, &flow_ext_map);
+	tcf_exts_init(&e, TCA_FLOW_ACT, TCA_FLOW_POLICE);
+	err = tcf_exts_validate(net, tp, tb, tca[TCA_RATE], &e);
 	if (err < 0)
 		return err;
 
@@ -525,6 +451,7 @@ static int flow_change(struct tcf_proto *tp, unsigned long base,
 
 		f->handle = handle;
 		f->mask	  = ~0U;
+		tcf_exts_init(&f->exts, TCA_FLOW_ACT, TCA_FLOW_POLICE);
 
 		get_random_bytes(&f->hashrnd, 4);
 		f->perturb_timer.function = flow_perturbation;
@@ -636,7 +563,7 @@ static void flow_put(struct tcf_proto *tp, unsigned long f)
 {
 }
 
-static int flow_dump(struct tcf_proto *tp, unsigned long fh,
+static int flow_dump(struct net *net, struct tcf_proto *tp, unsigned long fh,
 		     struct sk_buff *skb, struct tcmsg *t)
 {
 	struct flow_filter *f = (struct flow_filter *)fh;
@@ -651,27 +578,34 @@ static int flow_dump(struct tcf_proto *tp, unsigned long fh,
 	if (nest == NULL)
 		goto nla_put_failure;
 
-	NLA_PUT_U32(skb, TCA_FLOW_KEYS, f->keymask);
-	NLA_PUT_U32(skb, TCA_FLOW_MODE, f->mode);
+	if (nla_put_u32(skb, TCA_FLOW_KEYS, f->keymask) ||
+	    nla_put_u32(skb, TCA_FLOW_MODE, f->mode))
+		goto nla_put_failure;
 
 	if (f->mask != ~0 || f->xor != 0) {
-		NLA_PUT_U32(skb, TCA_FLOW_MASK, f->mask);
-		NLA_PUT_U32(skb, TCA_FLOW_XOR, f->xor);
+		if (nla_put_u32(skb, TCA_FLOW_MASK, f->mask) ||
+		    nla_put_u32(skb, TCA_FLOW_XOR, f->xor))
+			goto nla_put_failure;
 	}
-	if (f->rshift)
-		NLA_PUT_U32(skb, TCA_FLOW_RSHIFT, f->rshift);
-	if (f->addend)
-		NLA_PUT_U32(skb, TCA_FLOW_ADDEND, f->addend);
+	if (f->rshift &&
+	    nla_put_u32(skb, TCA_FLOW_RSHIFT, f->rshift))
+		goto nla_put_failure;
+	if (f->addend &&
+	    nla_put_u32(skb, TCA_FLOW_ADDEND, f->addend))
+		goto nla_put_failure;
 
-	if (f->divisor)
-		NLA_PUT_U32(skb, TCA_FLOW_DIVISOR, f->divisor);
-	if (f->baseclass)
-		NLA_PUT_U32(skb, TCA_FLOW_BASECLASS, f->baseclass);
+	if (f->divisor &&
+	    nla_put_u32(skb, TCA_FLOW_DIVISOR, f->divisor))
+		goto nla_put_failure;
+	if (f->baseclass &&
+	    nla_put_u32(skb, TCA_FLOW_BASECLASS, f->baseclass))
+		goto nla_put_failure;
 
-	if (f->perturb_period)
-		NLA_PUT_U32(skb, TCA_FLOW_PERTURB, f->perturb_period / HZ);
+	if (f->perturb_period &&
+	    nla_put_u32(skb, TCA_FLOW_PERTURB, f->perturb_period / HZ))
+		goto nla_put_failure;
 
-	if (tcf_exts_dump(skb, &f->exts, &flow_ext_map) < 0)
+	if (tcf_exts_dump(skb, &f->exts) < 0)
 		goto nla_put_failure;
 #ifdef CONFIG_NET_EMATCH
 	if (f->ematches.hdr.nmatches &&
@@ -680,7 +614,7 @@ static int flow_dump(struct tcf_proto *tp, unsigned long fh,
 #endif
 	nla_nest_end(skb, nest);
 
-	if (tcf_exts_dump_stats(skb, &f->exts, &flow_ext_map) < 0)
+	if (tcf_exts_dump_stats(skb, &f->exts) < 0)
 		goto nla_put_failure;
 
 	return skb->len;

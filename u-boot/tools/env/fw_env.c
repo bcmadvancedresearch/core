@@ -1,31 +1,17 @@
 /*
- * (C) Copyright 2000-2008
+ * (C) Copyright 2000-2010
  * Wolfgang Denk, DENX Software Engineering, wd@denx.de.
  *
  * (C) Copyright 2008
  * Guennadi Liakhovetski, DENX Software Engineering, lg@denx.de.
  *
- * See file CREDITS for list of people who contributed to this
- * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 #include <errno.h>
+#include <env_flags.h>
 #include <fcntl.h>
+#include <linux/stringify.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -45,8 +31,7 @@
 
 #include "fw_env.h"
 
-#define	CMD_GETENV	"fw_printenv"
-#define	CMD_SETENV	"fw_setenv"
+#define WHITESPACE(c) ((c == '\t') || (c == ' '))
 
 #define min(x, y) ({				\
 	typeof(x) _min1 = (x);			\
@@ -80,7 +65,7 @@ static int dev_current;
 #define ENVSECTORS(i) envdevices[(i)].env_sectors
 #define DEVTYPE(i)    envdevices[(i)].mtd_type
 
-#define CONFIG_ENV_SIZE ENVSIZE(dev_current)
+#define CUR_ENVSIZE ENVSIZE(dev_current)
 
 #define ENV_SIZE      getenvsize()
 
@@ -119,98 +104,11 @@ static unsigned char active_flag = 1;
 /* obsolete_flag must be 0 to efficiently set it on NOR flash without erasing */
 static unsigned char obsolete_flag = 0;
 
-
-#define XMK_STR(x)	#x
-#define MK_STR(x)	XMK_STR(x)
-
-static char default_environment[] = {
-#if defined(CONFIG_BOOTARGS)
-	"bootargs=" CONFIG_BOOTARGS "\0"
-#endif
-#if defined(CONFIG_BOOTCOMMAND)
-	"bootcmd=" CONFIG_BOOTCOMMAND "\0"
-#endif
-#if defined(CONFIG_RAMBOOTCOMMAND)
-	"ramboot=" CONFIG_RAMBOOTCOMMAND "\0"
-#endif
-#if defined(CONFIG_NFSBOOTCOMMAND)
-	"nfsboot=" CONFIG_NFSBOOTCOMMAND "\0"
-#endif
-#if defined(CONFIG_BOOTDELAY) && (CONFIG_BOOTDELAY >= 0)
-	"bootdelay=" MK_STR (CONFIG_BOOTDELAY) "\0"
-#endif
-#if defined(CONFIG_BAUDRATE) && (CONFIG_BAUDRATE >= 0)
-	"baudrate=" MK_STR (CONFIG_BAUDRATE) "\0"
-#endif
-#ifdef	CONFIG_LOADS_ECHO
-	"loads_echo=" MK_STR (CONFIG_LOADS_ECHO) "\0"
-#endif
-#ifdef	CONFIG_ETHADDR
-	"ethaddr=" MK_STR (CONFIG_ETHADDR) "\0"
-#endif
-#ifdef	CONFIG_ETH1ADDR
-	"eth1addr=" MK_STR (CONFIG_ETH1ADDR) "\0"
-#endif
-#ifdef	CONFIG_ETH2ADDR
-	"eth2addr=" MK_STR (CONFIG_ETH2ADDR) "\0"
-#endif
-#ifdef	CONFIG_ETH3ADDR
-	"eth3addr=" MK_STR (CONFIG_ETH3ADDR) "\0"
-#endif
-#ifdef	CONFIG_ETH4ADDR
-	"eth4addr=" MK_STR (CONFIG_ETH4ADDR) "\0"
-#endif
-#ifdef	CONFIG_ETH5ADDR
-	"eth5addr=" MK_STR (CONFIG_ETH5ADDR) "\0"
-#endif
-#ifdef	CONFIG_ETHPRIME
-	"ethprime=" CONFIG_ETHPRIME "\0"
-#endif
-#ifdef	CONFIG_IPADDR
-	"ipaddr=" MK_STR (CONFIG_IPADDR) "\0"
-#endif
-#ifdef	CONFIG_SERVERIP
-	"serverip=" MK_STR (CONFIG_SERVERIP) "\0"
-#endif
-#ifdef	CONFIG_SYS_AUTOLOAD
-	"autoload=" CONFIG_SYS_AUTOLOAD "\0"
-#endif
-#ifdef	CONFIG_ROOTPATH
-	"rootpath=" MK_STR (CONFIG_ROOTPATH) "\0"
-#endif
-#ifdef	CONFIG_GATEWAYIP
-	"gatewayip=" MK_STR (CONFIG_GATEWAYIP) "\0"
-#endif
-#ifdef	CONFIG_NETMASK
-	"netmask=" MK_STR (CONFIG_NETMASK) "\0"
-#endif
-#ifdef	CONFIG_HOSTNAME
-	"hostname=" MK_STR (CONFIG_HOSTNAME) "\0"
-#endif
-#ifdef	CONFIG_BOOTFILE
-	"bootfile=" MK_STR (CONFIG_BOOTFILE) "\0"
-#endif
-#ifdef	CONFIG_LOADADDR
-	"loadaddr=" MK_STR (CONFIG_LOADADDR) "\0"
-#endif
-#ifdef	CONFIG_PREBOOT
-	"preboot=" CONFIG_PREBOOT "\0"
-#endif
-#ifdef	CONFIG_CLOCKS_IN_MHZ
-	"clocks_in_mhz=" "1" "\0"
-#endif
-#if defined(CONFIG_PCI_BOOTDELAY) && (CONFIG_PCI_BOOTDELAY > 0)
-	"pcidelay=" MK_STR (CONFIG_PCI_BOOTDELAY) "\0"
-#endif
-#ifdef  CONFIG_EXTRA_ENV_SETTINGS
-	CONFIG_EXTRA_ENV_SETTINGS
-#endif
-	"\0"		/* Termimate struct environment data with 2 NULs */
-};
+#define DEFAULT_ENV_INSTANCE_STATIC
+#include <env_default.h>
 
 static int flash_io (int mode);
 static char *envmatch (char * s1, char * s2);
-static int env_init (void);
 static int parse_config (void);
 
 #if defined(CONFIG_FILE)
@@ -218,11 +116,27 @@ static int get_config (char *);
 #endif
 static inline ulong getenvsize (void)
 {
-	ulong rc = CONFIG_ENV_SIZE - sizeof (long);
+	ulong rc = CUR_ENVSIZE - sizeof(long);
 
 	if (HaveRedundEnv)
 		rc -= sizeof (char);
 	return rc;
+}
+
+static char *fw_string_blank(char *s, int noblank)
+{
+	int i;
+	int len = strlen(s);
+
+	for (i = 0; i < len; i++, s++) {
+		if ((noblank && !WHITESPACE(*s)) ||
+			(!noblank && WHITESPACE(*s)))
+			break;
+	}
+	if (i == len)
+		return NULL;
+
+	return s;
 }
 
 /*
@@ -232,9 +146,6 @@ static inline ulong getenvsize (void)
 char *fw_getenv (char *name)
 {
 	char *env, *nxt;
-
-	if (env_init ())
-		return NULL;
 
 	for (env = environment.data; *env; env = nxt + 1) {
 		char *val;
@@ -255,6 +166,32 @@ char *fw_getenv (char *name)
 }
 
 /*
+ * Search the default environment for a variable.
+ * Return the value, if found, or NULL, if not found.
+ */
+char *fw_getdefenv(char *name)
+{
+	char *env, *nxt;
+
+	for (env = default_environment; *env; env = nxt + 1) {
+		char *val;
+
+		for (nxt = env; *nxt; ++nxt) {
+			if (nxt >= &default_environment[ENV_SIZE]) {
+				fprintf(stderr, "## Error: "
+					"default environment not terminated\n");
+				return NULL;
+			}
+		}
+		val = envmatch(name, env);
+		if (!val)
+			continue;
+		return val;
+	}
+	return NULL;
+}
+
+/*
  * Print the current definition of one, or more, or all
  * environment variables
  */
@@ -264,7 +201,7 @@ int fw_printenv (int argc, char *argv[])
 	int i, n_flag;
 	int rc = 0;
 
-	if (env_init ())
+	if (fw_env_open())
 		return -1;
 
 	if (argc == 1) {		/* Print all env variables  */
@@ -327,30 +264,35 @@ int fw_printenv (int argc, char *argv[])
 	return rc;
 }
 
-/*
- * Deletes or sets environment variables. Returns -1 and sets errno error codes:
- * 0	  - OK
- * EINVAL - need at least 1 argument
- * EROFS  - certain variables ("ethaddr", "serial#") cannot be
- *	    modified or deleted
- *
- */
-int fw_setenv (int argc, char *argv[])
+int fw_env_close(void)
 {
-	int i, len;
-	char *env, *nxt;
-	char *oldval = NULL;
-	char *name;
+	/*
+	 * Update CRC
+	 */
+	*environment.crc = crc32(0, (uint8_t *) environment.data, ENV_SIZE);
 
-	if (argc < 2) {
-		errno = EINVAL;
-		return -1;
+	/* write environment back to flash */
+	if (flash_io(O_RDWR)) {
+		fprintf(stderr,
+			"Error: can't write fw_env to flash\n");
+			return -1;
 	}
 
-	if (env_init ())
-		return -1;
+	return 0;
+}
 
-	name = argv[1];
+
+/*
+ * Set/Clear a single variable in the environment.
+ * This is called in sequence to update the environment
+ * in RAM without updating the copy in flash after each set
+ */
+int fw_env_write(char *name, char *value)
+{
+	int len;
+	char *env, *nxt;
+	char *oldval = NULL;
+	int deleting, creating, overwriting;
 
 	/*
 	 * search if variable with this name already exists
@@ -358,7 +300,7 @@ int fw_setenv (int argc, char *argv[])
 	for (nxt = env = environment.data; *env; env = nxt + 1) {
 		for (nxt = env; *nxt; ++nxt) {
 			if (nxt >= &environment.data[ENV_SIZE]) {
-				fprintf (stderr, "## Error: "
+				fprintf(stderr, "## Error: "
 					"environment not terminated\n");
 				errno = EINVAL;
 				return -1;
@@ -368,20 +310,49 @@ int fw_setenv (int argc, char *argv[])
 			break;
 	}
 
-	/*
-	 * Delete any existing definition
-	 */
-	if (oldval) {
-		/*
-		 * Ethernet Address and serial# can be set only once
-		 */
-		if ((strcmp (name, "ethaddr") == 0) ||
-			(strcmp (name, "serial#") == 0)) {
-			fprintf (stderr, "Can't overwrite \"%s\"\n", name);
+	deleting = (oldval && !(value && strlen(value)));
+	creating = (!oldval && (value && strlen(value)));
+	overwriting = (oldval && (value && strlen(value)));
+
+	/* check for permission */
+	if (deleting) {
+		if (env_flags_validate_varaccess(name,
+		    ENV_FLAGS_VARACCESS_PREVENT_DELETE)) {
+			printf("Can't delete \"%s\"\n", name);
 			errno = EROFS;
 			return -1;
 		}
+	} else if (overwriting) {
+		if (env_flags_validate_varaccess(name,
+		    ENV_FLAGS_VARACCESS_PREVENT_OVERWR)) {
+			printf("Can't overwrite \"%s\"\n", name);
+			errno = EROFS;
+			return -1;
+		} else if (env_flags_validate_varaccess(name,
+		    ENV_FLAGS_VARACCESS_PREVENT_NONDEF_OVERWR)) {
+			const char *defval = fw_getdefenv(name);
 
+			if (defval == NULL)
+				defval = "";
+			if (strcmp(oldval, defval)
+			    != 0) {
+				printf("Can't overwrite \"%s\"\n", name);
+				errno = EROFS;
+				return -1;
+			}
+		}
+	} else if (creating) {
+		if (env_flags_validate_varaccess(name,
+		    ENV_FLAGS_VARACCESS_PREVENT_CREATE)) {
+			printf("Can't create \"%s\"\n", name);
+			errno = EROFS;
+			return -1;
+		}
+	} else
+		/* Nothing to do */
+		return 0;
+
+	if (deleting || overwriting) {
 		if (*++nxt == '\0') {
 			*env = '\0';
 		} else {
@@ -396,8 +367,8 @@ int fw_setenv (int argc, char *argv[])
 	}
 
 	/* Delete only ? */
-	if (argc < 3)
-		goto WRITE_FLASH;
+	if (!value || !strlen(value))
+		return 0;
 
 	/*
 	 * Append new definition at the end
@@ -407,45 +378,209 @@ int fw_setenv (int argc, char *argv[])
 		++env;
 	/*
 	 * Overflow when:
-	 * "name" + "=" + "val" +"\0\0"  > CONFIG_ENV_SIZE - (env-environment)
+	 * "name" + "=" + "val" +"\0\0"  > CUR_ENVSIZE - (env-environment)
 	 */
 	len = strlen (name) + 2;
 	/* add '=' for first arg, ' ' for all others */
-	for (i = 2; i < argc; ++i) {
-		len += strlen (argv[i]) + 1;
-	}
+	len += strlen(value) + 1;
+
 	if (len > (&environment.data[ENV_SIZE] - env)) {
 		fprintf (stderr,
 			"Error: environment overflow, \"%s\" deleted\n",
 			name);
 		return -1;
 	}
+
 	while ((*env = *name++) != '\0')
 		env++;
-	for (i = 2; i < argc; ++i) {
-		char *val = argv[i];
-
-		*env = (i == 2) ? '=' : ' ';
-		while ((*++env = *val++) != '\0');
-	}
+	*env = '=';
+	while ((*++env = *value++) != '\0')
+		;
 
 	/* end is marked with double '\0' */
 	*++env = '\0';
 
-  WRITE_FLASH:
+	return 0;
+}
 
-	/*
-	 * Update CRC
-	 */
-	*environment.crc = crc32 (0, (uint8_t *) environment.data, ENV_SIZE);
+/*
+ * Deletes or sets environment variables. Returns -1 and sets errno error codes:
+ * 0	  - OK
+ * EINVAL - need at least 1 argument
+ * EROFS  - certain variables ("ethaddr", "serial#") cannot be
+ *	    modified or deleted
+ *
+ */
+int fw_setenv(int argc, char *argv[])
+{
+	int i;
+	size_t len;
+	char *name;
+	char *value = NULL;
 
-	/* write environment back to flash */
-	if (flash_io (O_RDWR)) {
-		fprintf (stderr, "Error: can't write fw_env to flash\n");
+	if (argc < 2) {
+		errno = EINVAL;
 		return -1;
 	}
 
-	return 0;
+	if (fw_env_open()) {
+		fprintf(stderr, "Error: environment not initialized\n");
+		return -1;
+	}
+
+	name = argv[1];
+
+	if (env_flags_validate_env_set_params(argc, argv) < 0)
+		return 1;
+
+	len = 0;
+	for (i = 2; i < argc; ++i) {
+		char *val = argv[i];
+		size_t val_len = strlen(val);
+
+		if (value)
+			value[len - 1] = ' ';
+		value = realloc(value, len + val_len + 1);
+		if (!value) {
+			fprintf(stderr,
+				"Cannot malloc %zu bytes: %s\n",
+				len, strerror(errno));
+			return -1;
+		}
+
+		memcpy(value + len, val, val_len);
+		len += val_len;
+		value[len++] = '\0';
+	}
+
+	fw_env_write(name, value);
+
+	free(value);
+
+	return fw_env_close();
+}
+
+/*
+ * Parse  a file  and configure the u-boot variables.
+ * The script file has a very simple format, as follows:
+ *
+ * Each line has a couple with name, value:
+ * <white spaces>variable_name<white spaces>variable_value
+ *
+ * Both variable_name and variable_value are interpreted as strings.
+ * Any character after <white spaces> and before ending \r\n is interpreted
+ * as variable's value (no comment allowed on these lines !)
+ *
+ * Comments are allowed if the first character in the line is #
+ *
+ * Returns -1 and sets errno error codes:
+ * 0	  - OK
+ * -1     - Error
+ */
+int fw_parse_script(char *fname)
+{
+	FILE *fp;
+	char dump[1024];	/* Maximum line length in the file */
+	char *name;
+	char *val;
+	int lineno = 0;
+	int len;
+	int ret = 0;
+
+	if (fw_env_open()) {
+		fprintf(stderr, "Error: environment not initialized\n");
+		return -1;
+	}
+
+	if (strcmp(fname, "-") == 0)
+		fp = stdin;
+	else {
+		fp = fopen(fname, "r");
+		if (fp == NULL) {
+			fprintf(stderr, "I cannot open %s for reading\n",
+				 fname);
+			return -1;
+		}
+	}
+
+	while (fgets(dump, sizeof(dump), fp)) {
+		lineno++;
+		len = strlen(dump);
+
+		/*
+		 * Read a whole line from the file. If the line is too long
+		 * or is not terminated, reports an error and exit.
+		 */
+		if (dump[len - 1] != '\n') {
+			fprintf(stderr,
+			"Line %d not corrected terminated or too long\n",
+				lineno);
+			ret = -1;
+			break;
+		}
+
+		/* Drop ending line feed / carriage return */
+		while (len > 0 && (dump[len - 1] == '\n' ||
+				dump[len - 1] == '\r')) {
+			dump[len - 1] = '\0';
+			len--;
+		}
+
+		/* Skip comment or empty lines */
+		if ((len == 0) || dump[0] == '#')
+			continue;
+
+		/*
+		 * Search for variable's name,
+		 * remove leading whitespaces
+		 */
+		name = fw_string_blank(dump, 1);
+		if (!name)
+			continue;
+
+		/* The first white space is the end of variable name */
+		val = fw_string_blank(name, 0);
+		len = strlen(name);
+		if (val) {
+			*val++ = '\0';
+			if ((val - name) < len)
+				val = fw_string_blank(val, 1);
+			else
+				val = NULL;
+		}
+
+#ifdef DEBUG
+		fprintf(stderr, "Setting %s : %s\n",
+			name, val ? val : " removed");
+#endif
+
+		if (env_flags_validate_type(name, val) < 0) {
+			ret = -1;
+			break;
+		}
+
+		/*
+		 * If there is an error setting a variable,
+		 * try to save the environment and returns an error
+		 */
+		if (fw_env_write(name, val)) {
+			fprintf(stderr,
+			"fw_env_write returns with error : %s\n",
+				strerror(errno));
+			ret = -1;
+			break;
+		}
+
+	}
+
+	/* Close file if not stdin */
+	if (strcmp(fname, "-") != 0)
+		fclose(fp);
+
+	ret |= fw_env_close();
+
+	return ret;
+
 }
 
 /*
@@ -495,11 +630,7 @@ static int flash_read_buf (int dev, int fd, void *buf, size_t count,
 				   MEMGETBADBLOCK needs 64 bits */
 	int rc;
 
-	/*
-	 * Start of the first block to be read, relies on the fact, that
-	 * erase sector size is always a power of 2
-	 */
-	blockstart = offset & ~(DEVESIZE (dev) - 1);
+	blockstart = (offset / DEVESIZE (dev)) * DEVESIZE (dev);
 
 	/* Offset inside a block */
 	block_seek = offset - blockstart;
@@ -515,8 +646,8 @@ static int flash_read_buf (int dev, int fd, void *buf, size_t count,
 		 * To calculate the top of the range, we have to use the
 		 * global DEVOFFSET (dev), which can be different from offset
 		 */
-		top_of_range = (DEVOFFSET (dev) & ~(blocklen - 1)) +
-			ENVSECTORS (dev) * blocklen;
+		top_of_range = ((DEVOFFSET(dev) / blocklen) +
+				ENVSECTORS (dev)) * blocklen;
 
 		/* Limit to one block for the first read */
 		if (readlen > blocklen - block_seek)
@@ -557,8 +688,8 @@ static int flash_read_buf (int dev, int fd, void *buf, size_t count,
 			return -1;
 		}
 #ifdef DEBUG
-		fprintf (stderr, "Read 0x%x bytes at 0x%llx\n",
-			 rc, blockstart + block_seek);
+		fprintf(stderr, "Read 0x%x bytes at 0x%llx on %s\n",
+			 rc, blockstart + block_seek, DEVNAME(dev));
 #endif
 		processed += readlen;
 		readlen = min (blocklen, count - processed);
@@ -570,9 +701,9 @@ static int flash_read_buf (int dev, int fd, void *buf, size_t count,
 }
 
 /*
- * Write count bytes at offset, but stay within ENVSETCORS (dev) sectors of
- * DEVOFFSET (dev). Similar to the read case above, on NOR we erase and write
- * the whole data at once.
+ * Write count bytes at offset, but stay within ENVSECTORS (dev) sectors of
+ * DEVOFFSET (dev). Similar to the read case above, on NOR and dataflash we
+ * erase and write the whole data at once.
  */
 static int flash_write_buf (int dev, int fd, void *buf, size_t count,
 			    off_t offset, uint8_t mtd_type)
@@ -585,7 +716,7 @@ static int flash_write_buf (int dev, int fd, void *buf, size_t count,
 	size_t erasesize;	/* erase / write length - one block on NAND,
 				   whole area on NOR */
 	size_t processed = 0;	/* progress counter */
-	size_t write_total;	/* total size to actually write - excludinig
+	size_t write_total;	/* total size to actually write - excluding
 				   bad blocks */
 	off_t erase_offset;	/* offset to the first erase block (aligned)
 				   below offset */
@@ -596,27 +727,39 @@ static int flash_write_buf (int dev, int fd, void *buf, size_t count,
 				   MEMGETBADBLOCK needs 64 bits */
 	int rc;
 
-	blocklen = DEVESIZE (dev);
-
-	/* Erase sector size is always a power of 2 */
-	top_of_range = (DEVOFFSET (dev) & ~(blocklen - 1)) +
-		ENVSECTORS (dev) * blocklen;
-
-	erase_offset = offset & ~(blocklen - 1);
-
-	/* Maximum area we may use */
-	erase_len = top_of_range - erase_offset;
-
-	blockstart = erase_offset;
-	/* Offset inside a block */
-	block_seek = offset - erase_offset;
-
 	/*
-	 * Data size we actually have to write: from the start of the block
-	 * to the start of the data, then count bytes of data, and to the
-	 * end of the block
+	 * For mtd devices only offset and size of the environment do matter
 	 */
-	write_total = (block_seek + count + blocklen - 1) & ~(blocklen - 1);
+	if (mtd_type == MTD_ABSENT) {
+		blocklen = count;
+		top_of_range = offset + count;
+		erase_len = blocklen;
+		blockstart = offset;
+		block_seek = 0;
+		write_total = blocklen;
+	} else {
+		blocklen = DEVESIZE(dev);
+
+		top_of_range = ((DEVOFFSET(dev) / blocklen) +
+					ENVSECTORS(dev)) * blocklen;
+
+		erase_offset = (offset / blocklen) * blocklen;
+
+		/* Maximum area we may use */
+		erase_len = top_of_range - erase_offset;
+
+		blockstart = erase_offset;
+		/* Offset inside a block */
+		block_seek = offset - erase_offset;
+
+		/*
+		 * Data size we actually write: from the start of the block
+		 * to the start of the data, then count bytes of data, and
+		 * to the end of the block
+		 */
+		write_total = ((block_seek + count + blocklen - 1) /
+							blocklen) * blocklen;
+	}
 
 	/*
 	 * Support data anywhere within erase sectors: read out the complete
@@ -627,7 +770,7 @@ static int flash_write_buf (int dev, int fd, void *buf, size_t count,
 		data = malloc (erase_len);
 		if (!data) {
 			fprintf (stderr,
-				 "Cannot malloc %u bytes: %s\n",
+				 "Cannot malloc %zu bytes: %s\n",
 				 erase_len, strerror (errno));
 			return -1;
 		}
@@ -637,6 +780,18 @@ static int flash_write_buf (int dev, int fd, void *buf, size_t count,
 		if (write_total != rc)
 			return -1;
 
+#ifdef DEBUG
+		fprintf(stderr, "Preserving data ");
+		if (block_seek != 0)
+			fprintf(stderr, "0x%x - 0x%lx", 0, block_seek - 1);
+		if (block_seek + count != write_total) {
+			if (block_seek != 0)
+				fprintf(stderr, " and ");
+			fprintf(stderr, "0x%lx - 0x%x",
+				block_seek + count, write_total - 1);
+		}
+		fprintf(stderr, "\n");
+#endif
 		/* Overwrite the old environment */
 		memcpy (data + block_seek, buf, count);
 	} else {
@@ -659,7 +814,7 @@ static int flash_write_buf (int dev, int fd, void *buf, size_t count,
 
 	erase.length = erasesize;
 
-	/* This only runs once on NOR flash */
+	/* This only runs once on NOR flash and SPI-dataflash */
 	while (processed < write_total) {
 		rc = flash_bad_block (fd, mtd_type, &blockstart);
 		if (rc < 0)		/* block test failed */
@@ -675,14 +830,17 @@ static int flash_write_buf (int dev, int fd, void *buf, size_t count,
 			continue;
 		}
 
-		erase.start = blockstart;
-		ioctl (fd, MEMUNLOCK, &erase);
-
-		if (ioctl (fd, MEMERASE, &erase) != 0) {
-			fprintf (stderr, "MTD erase error on %s: %s\n",
-				 DEVNAME (dev),
-				 strerror (errno));
-			return -1;
+		if (mtd_type != MTD_ABSENT) {
+			erase.start = blockstart;
+			ioctl(fd, MEMUNLOCK, &erase);
+			/* These do not need an explicit erase cycle */
+			if (mtd_type != MTD_DATAFLASH)
+				if (ioctl(fd, MEMERASE, &erase) != 0) {
+					fprintf(stderr,
+						"MTD erase error on %s: %s\n",
+						DEVNAME(dev), strerror(errno));
+					return -1;
+				}
 		}
 
 		if (lseek (fd, blockstart, SEEK_SET) == -1) {
@@ -693,7 +851,8 @@ static int flash_write_buf (int dev, int fd, void *buf, size_t count,
 		}
 
 #ifdef DEBUG
-		printf ("Write 0x%x bytes at 0x%llx\n", erasesize, blockstart);
+		fprintf(stderr, "Write 0x%x bytes at 0x%llx\n", erasesize,
+			blockstart);
 #endif
 		if (write (fd, data + processed, erasesize) != erasesize) {
 			fprintf (stderr, "Write error on %s: %s\n",
@@ -701,11 +860,12 @@ static int flash_write_buf (int dev, int fd, void *buf, size_t count,
 			return -1;
 		}
 
-		ioctl (fd, MEMLOCK, &erase);
+		if (mtd_type != MTD_ABSENT)
+			ioctl(fd, MEMLOCK, &erase);
 
-		processed  += blocklen;
+		processed  += erasesize;
 		block_seek = 0;
-		blockstart += blocklen;
+		blockstart += erasesize;
 	}
 
 	if (write_total > count)
@@ -720,7 +880,10 @@ static int flash_write_buf (int dev, int fd, void *buf, size_t count,
 static int flash_flag_obsolete (int dev, int fd, off_t offset)
 {
 	int rc;
+	struct erase_info_user erase;
 
+	erase.start  = DEVOFFSET (dev);
+	erase.length = DEVESIZE (dev);
 	/* This relies on the fact, that obsolete_flag == 0 */
 	rc = lseek (fd, offset, SEEK_SET);
 	if (rc < 0) {
@@ -728,7 +891,9 @@ static int flash_flag_obsolete (int dev, int fd, off_t offset)
 			 DEVNAME (dev));
 		return rc;
 	}
+	ioctl (fd, MEMUNLOCK, &erase);
 	rc = write (fd, &obsolete_flag, sizeof (obsolete_flag));
+	ioctl (fd, MEMLOCK, &erase);
 	if (rc < 0)
 		perror ("Could not set obsolete flag");
 
@@ -755,11 +920,11 @@ static int flash_write (int fd_current, int fd_target, int dev_target)
 	}
 
 #ifdef DEBUG
-	printf ("Writing new environment at 0x%lx on %s\n",
+	fprintf(stderr, "Writing new environment at 0x%lx on %s\n",
 		DEVOFFSET (dev_target), DEVNAME (dev_target));
 #endif
-	rc = flash_write_buf (dev_target, fd_target, environment.image,
-			      CONFIG_ENV_SIZE, DEVOFFSET (dev_target),
+	rc = flash_write_buf(dev_target, fd_target, environment.image,
+			      CUR_ENVSIZE, DEVOFFSET(dev_target),
 			      DEVTYPE(dev_target));
 	if (rc < 0)
 		return rc;
@@ -769,7 +934,8 @@ static int flash_write (int fd_current, int fd_target, int dev_target)
 		off_t offset = DEVOFFSET (dev_current) +
 			offsetof (struct env_image_redundant, flags);
 #ifdef DEBUG
-		printf ("Setting obsolete flag in environment at 0x%lx on %s\n",
+		fprintf(stderr,
+			"Setting obsolete flag in environment at 0x%lx on %s\n",
 			DEVOFFSET (dev_current), DEVNAME (dev_current));
 #endif
 		flash_flag_obsolete (dev_current, fd_current, offset);
@@ -781,25 +947,42 @@ static int flash_write (int fd_current, int fd_target, int dev_target)
 static int flash_read (int fd)
 {
 	struct mtd_info_user mtdinfo;
+	struct stat st;
 	int rc;
 
-	rc = ioctl (fd, MEMGETINFO, &mtdinfo);
+	rc = fstat(fd, &st);
 	if (rc < 0) {
-		perror ("Cannot get MTD information");
+		fprintf(stderr, "Cannot stat the file %s\n",
+			DEVNAME(dev_current));
 		return -1;
 	}
 
-	if (mtdinfo.type != MTD_NORFLASH && mtdinfo.type != MTD_NANDFLASH) {
-		fprintf (stderr, "Unsupported flash type %u\n", mtdinfo.type);
-		return -1;
+	if (S_ISCHR(st.st_mode)) {
+		rc = ioctl(fd, MEMGETINFO, &mtdinfo);
+		if (rc < 0) {
+			fprintf(stderr, "Cannot get MTD information for %s\n",
+				DEVNAME(dev_current));
+			return -1;
+		}
+		if (mtdinfo.type != MTD_NORFLASH &&
+		    mtdinfo.type != MTD_NANDFLASH &&
+		    mtdinfo.type != MTD_DATAFLASH &&
+		    mtdinfo.type != MTD_UBIVOLUME) {
+			fprintf (stderr, "Unsupported flash type %u on %s\n",
+				 mtdinfo.type, DEVNAME(dev_current));
+			return -1;
+		}
+	} else {
+		memset(&mtdinfo, 0, sizeof(mtdinfo));
+		mtdinfo.type = MTD_ABSENT;
 	}
 
 	DEVTYPE(dev_current) = mtdinfo.type;
 
-	rc = flash_read_buf (dev_current, fd, environment.image, CONFIG_ENV_SIZE,
+	rc = flash_read_buf(dev_current, fd, environment.image, CUR_ENVSIZE,
 			     DEVOFFSET (dev_current), mtdinfo.type);
 
-	return (rc != CONFIG_ENV_SIZE) ? -1 : 0;
+	return (rc != CUR_ENVSIZE) ? -1 : 0;
 }
 
 static int flash_io (int mode)
@@ -868,6 +1051,8 @@ exit:
 
 static char *envmatch (char * s1, char * s2)
 {
+	if (s1 == NULL || s2 == NULL)
+		return NULL;
 
 	while (*s1 == *s2++)
 		if (*s1++ == '=')
@@ -880,14 +1065,14 @@ static char *envmatch (char * s1, char * s2)
 /*
  * Prevent confusion if running from erased flash memory
  */
-static int env_init (void)
+int fw_env_open(void)
 {
 	int crc0, crc0_ok;
-	char flag0;
+	unsigned char flag0;
 	void *addr0;
 
 	int crc1, crc1_ok;
-	char flag1;
+	unsigned char flag1;
 	void *addr1;
 
 	struct env_image_single *single;
@@ -896,11 +1081,11 @@ static int env_init (void)
 	if (parse_config ())		/* should fill envdevices */
 		return -1;
 
-	addr0 = calloc (1, CONFIG_ENV_SIZE);
+	addr0 = calloc(1, CUR_ENVSIZE);
 	if (addr0 == NULL) {
-		fprintf (stderr,
+		fprintf(stderr,
 			"Not enough memory for environment (%ld bytes)\n",
-			CONFIG_ENV_SIZE);
+			CUR_ENVSIZE);
 		return -1;
 	}
 
@@ -935,11 +1120,11 @@ static int env_init (void)
 		flag0 = *environment.flags;
 
 		dev_current = 1;
-		addr1 = calloc (1, CONFIG_ENV_SIZE);
+		addr1 = calloc(1, CUR_ENVSIZE);
 		if (addr1 == NULL) {
-			fprintf (stderr,
+			fprintf(stderr,
 				"Not enough memory for environment (%ld bytes)\n",
-				CONFIG_ENV_SIZE);
+				CUR_ENVSIZE);
 			return -1;
 		}
 		redundant = addr1;
@@ -958,6 +1143,15 @@ static int env_init (void)
 			environment.flag_scheme = FLAG_BOOLEAN;
 		} else if (DEVTYPE(dev_current) == MTD_NANDFLASH &&
 			   DEVTYPE(!dev_current) == MTD_NANDFLASH) {
+			environment.flag_scheme = FLAG_INCREMENTAL;
+		} else if (DEVTYPE(dev_current) == MTD_DATAFLASH &&
+			   DEVTYPE(!dev_current) == MTD_DATAFLASH) {
+			environment.flag_scheme = FLAG_BOOLEAN;
+		} else if (DEVTYPE(dev_current) == MTD_UBIVOLUME &&
+			   DEVTYPE(!dev_current) == MTD_UBIVOLUME) {
+			environment.flag_scheme = FLAG_INCREMENTAL;
+		} else if (DEVTYPE(dev_current) == MTD_ABSENT &&
+			   DEVTYPE(!dev_current) == MTD_ABSENT) {
 			environment.flag_scheme = FLAG_INCREMENTAL;
 		} else {
 			fprintf (stderr, "Incompatible flash types!\n");
@@ -998,14 +1192,13 @@ static int env_init (void)
 				}
 				break;
 			case FLAG_INCREMENTAL:
-				if ((flag0 == 255 && flag1 == 0) ||
-				    flag1 > flag0)
+				if (flag0 == 255 && flag1 == 0)
 					dev_current = 1;
 				else if ((flag1 == 255 && flag0 == 0) ||
-					 flag0 > flag1)
+					 flag0 >= flag1)
 					dev_current = 0;
-				else /* flags are equal - almost impossible */
-					dev_current = 0;
+				else /* flag1 > flag0 */
+					dev_current = 1;
 				break;
 			default:
 				fprintf (stderr, "Unknown flag scheme %u \n",
@@ -1030,6 +1223,9 @@ static int env_init (void)
 			/* Other pointers are already set */
 			free (addr1);
 		}
+#ifdef DEBUG
+		fprintf(stderr, "Selected env in %s\n", DEVNAME(dev_current));
+#endif
 	}
 	return 0;
 }
@@ -1050,14 +1246,31 @@ static int parse_config ()
 	strcpy (DEVNAME (0), DEVICE1_NAME);
 	DEVOFFSET (0) = DEVICE1_OFFSET;
 	ENVSIZE (0) = ENV1_SIZE;
+	/* Default values are: erase-size=env-size */
+	DEVESIZE (0) = ENVSIZE (0);
+	/* #sectors=env-size/erase-size (rounded up) */
+	ENVSECTORS (0) = (ENVSIZE(0) + DEVESIZE(0) - 1) / DEVESIZE(0);
+#ifdef DEVICE1_ESIZE
 	DEVESIZE (0) = DEVICE1_ESIZE;
+#endif
+#ifdef DEVICE1_ENVSECTORS
 	ENVSECTORS (0) = DEVICE1_ENVSECTORS;
+#endif
+
 #ifdef HAVE_REDUND
 	strcpy (DEVNAME (1), DEVICE2_NAME);
 	DEVOFFSET (1) = DEVICE2_OFFSET;
 	ENVSIZE (1) = ENV2_SIZE;
+	/* Default values are: erase-size=env-size */
+	DEVESIZE (1) = ENVSIZE (1);
+	/* #sectors=env-size/erase-size (rounded up) */
+	ENVSECTORS (1) = (ENVSIZE(1) + DEVESIZE(1) - 1) / DEVESIZE(1);
+#ifdef DEVICE2_ESIZE
 	DEVESIZE (1) = DEVICE2_ESIZE;
+#endif
+#ifdef DEVICE2_ENVSECTORS
 	ENVSECTORS (1) = DEVICE2_ENVSECTORS;
+#endif
 	HaveRedundEnv = 1;
 #endif
 #endif
@@ -1101,12 +1314,16 @@ static int get_config (char *fname)
 			     &DEVESIZE (i),
 			     &ENVSECTORS (i));
 
-		if (rc < 4)
+		if (rc < 3)
 			continue;
 
+		if (rc < 4)
+			/* Assume the erase size is the same as the env-size */
+			DEVESIZE(i) = ENVSIZE(i);
+
 		if (rc < 5)
-			/* Default - 1 sector */
-			ENVSECTORS (i) = 1;
+			/* Assume enough env sectors to cover the environment */
+			ENVSECTORS (i) = (ENVSIZE(i) + DEVESIZE(i) - 1) / DEVESIZE(i);
 
 		i++;
 	}

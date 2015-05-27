@@ -65,6 +65,7 @@
 #include <linux/wimax.h>
 #include <linux/security.h>
 #include <linux/rfkill.h>
+#include <linux/export.h>
 #include "wimax-internal.h"
 
 #define D_SUBMODULE op_rfkill
@@ -410,17 +411,6 @@ void wimax_rfkill_rm(struct wimax_dev *wimax_dev)
  * just query).
  */
 
-static const struct nla_policy wimax_gnl_rfkill_policy[WIMAX_GNL_ATTR_MAX + 1] = {
-	[WIMAX_GNL_RFKILL_IFIDX] = {
-		.type = NLA_U32,
-	},
-	[WIMAX_GNL_RFKILL_STATE] = {
-		.type = NLA_U32		/* enum wimax_rf_state */
-	},
-};
-
-
-static
 int wimax_gnl_doit_rfkill(struct sk_buff *skb, struct genl_info *info)
 {
 	int result, ifindex;
@@ -456,13 +446,3 @@ error_no_wimax_dev:
 	d_fnend(3, NULL, "(skb %p info %p) = %d\n", skb, info, result);
 	return result;
 }
-
-
-struct genl_ops wimax_gnl_rfkill = {
-	.cmd = WIMAX_GNL_OP_RFKILL,
-	.flags = GENL_ADMIN_PERM,
-	.policy = wimax_gnl_rfkill_policy,
-	.doit = wimax_gnl_doit_rfkill,
-	.dumpit = NULL,
-};
-

@@ -7,7 +7,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/sched.h>
 #include <linux/string.h>
 #include <linux/cryptohash.h>
@@ -18,7 +18,6 @@
 #include <linux/io.h>
 
 #include <asm/checksum.h>
-#include <asm/system.h>
 #include <asm/ftrace.h>
 
 /*
@@ -36,6 +35,8 @@ extern void __ucmpdi2(void);
 extern void __udivsi3(void);
 extern void __umodsi3(void);
 extern void __do_div64(void);
+extern void __bswapsi2(void);
+extern void __bswapdi2(void);
 
 extern void __aeabi_idiv(void);
 extern void __aeabi_idivmod(void);
@@ -49,12 +50,8 @@ extern void __aeabi_ulcmp(void);
 
 extern void fpundefinstr(void);
 
-
-EXPORT_SYMBOL(__backtrace);
-
 	/* platform dependent support */
-EXPORT_SYMBOL(__udelay);
-EXPORT_SYMBOL(__const_udelay);
+EXPORT_SYMBOL(arm_delay_ops);
 
 	/* networking */
 EXPORT_SYMBOL(csum_partial);
@@ -91,10 +88,6 @@ EXPORT_SYMBOL(memmove);
 EXPORT_SYMBOL(memchr);
 EXPORT_SYMBOL(__memzero);
 
-	/* user mem (segment) */
-EXPORT_SYMBOL(__strnlen_user);
-EXPORT_SYMBOL(__strncpy_from_user);
-
 #ifdef CONFIG_MMU
 EXPORT_SYMBOL(copy_page);
 
@@ -112,9 +105,6 @@ EXPORT_SYMBOL(__put_user_4);
 EXPORT_SYMBOL(__put_user_8);
 #endif
 
-	/* crypto hash */
-EXPORT_SYMBOL(sha_transform);
-
 	/* gcc lib functions */
 EXPORT_SYMBOL(__ashldi3);
 EXPORT_SYMBOL(__ashrdi3);
@@ -126,6 +116,8 @@ EXPORT_SYMBOL(__ucmpdi2);
 EXPORT_SYMBOL(__udivsi3);
 EXPORT_SYMBOL(__umodsi3);
 EXPORT_SYMBOL(__do_div64);
+EXPORT_SYMBOL(__bswapsi2);
+EXPORT_SYMBOL(__bswapdi2);
 
 #ifdef CONFIG_AEABI
 EXPORT_SYMBOL(__aeabi_idiv);
@@ -167,4 +159,5 @@ EXPORT_SYMBOL(__gnu_mcount_nc);
 
 #ifdef CONFIG_ARM_PATCH_PHYS_VIRT
 EXPORT_SYMBOL(__pv_phys_offset);
+EXPORT_SYMBOL(__pv_offset);
 #endif

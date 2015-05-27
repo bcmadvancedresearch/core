@@ -1,21 +1,8 @@
-/* LowLevel function for ATMEL DataFlash support
+/*
+ * LowLevel function for ATMEL DataFlash support
  * Author : Hamid Ikdoumi (Atmel)
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
- *
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 #include <common.h>
 #include <config.h>
@@ -39,7 +26,6 @@ int AT91F_DataflashInit (void)
 	int i, j;
 	int dfcode;
 	int part;
-	int last_part;
 	int found[CONFIG_SYS_MAX_DATAFLASH_BANKS];
 	unsigned char protected;
 
@@ -136,7 +122,6 @@ int AT91F_DataflashInit (void)
 				dataflash_info[i].Device.pages_size) - 1;
 
 		part = 0;
-		last_part = 0;
 		/* set the area addresses */
 		for(j = 0; j < NB_DATAFLASH_AREA; j++) {
 			if(found[i]!=0) {
@@ -147,7 +132,6 @@ int AT91F_DataflashInit (void)
 					dataflash_info[i].Device.area_list[j].end =
 						dataflash_info[i].end_address +
 						dataflash_info[i].logical_address;
-					last_part = 1;
 				} else {
 					dataflash_info[i].Device.area_list[j].end =
 						area_list[part].end +

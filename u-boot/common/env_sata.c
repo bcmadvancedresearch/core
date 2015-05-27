@@ -1,5 +1,5 @@
 /*
- * (C) Copyright 2010-2011 Freescale Semiconductor, Inc.
+ * (C) Copyright 2010-2014 Freescale Semiconductor, Inc.
  *
  * See file CREDITS for list of people who contributed to this
  * project.
@@ -27,10 +27,8 @@
 #include <command.h>
 #include <environment.h>
 #include <linux/stddef.h>
+#include <errno.h>
 #include <sata.h>
-
-/* references to names in env_common.c */
-extern uchar default_environment[];
 
 char *env_name_spec = "SATA";
 
@@ -82,7 +80,10 @@ inline int write_env(block_dev_desc_t *sata, unsigned long size,
 
 int saveenv(void)
 {
-	struct block_dev_desc_t *sata = NULL;
+	block_dev_desc_t *sata = NULL;
+	env_t	env_new;
+	ssize_t	len;
+	char *res;
 
 	if (sata_curr_device == -1) {
 		if (sata_initialize())
@@ -98,8 +99,16 @@ int saveenv(void)
 
 	sata = sata_get_dev(sata_curr_device);
 
-	printf("Writing to SATA(%d)... ", sata_curr_device);
-	if (write_env(sata, CONFIG_ENV_SIZE, CONFIG_ENV_OFFSET, env_ptr)) {
+	res = (char *)&env_new.data;
+	len = hexport_r(&env_htab, '\0', 0, &res, ENV_SIZE, 0, NULL);
+	if (len < 0) {
+		error("Cannot export environment: errno = %d\n", errno);
+		return 1;
+	}
+	env_new.crc = crc32(0, env_new.data, ENV_SIZE);
+
+	printf("Writing to SATA(%d)...", sata_curr_device);
+	if (write_env(sata, CONFIG_ENV_SIZE, CONFIG_ENV_OFFSET, &env_new)) {
 		puts("failed\n");
 		return 1;
 	}
@@ -126,29 +135,30 @@ inline int read_env(block_dev_desc_t *sata, unsigned long size,
 void env_relocate_spec(void)
 {
 #if !defined(ENV_IS_EMBEDDED)
-	struct block_dev_desc_t *sata = NULL;
-	int i = 0;
+	block_dev_desc_t *sata = NULL;
+	char buf[CONFIG_ENV_SIZE];
+	int ret;
 
 	if (sata_curr_device == -1) {
 		if (sata_initialize())
-			return 1;
+			return;
 		sata_curr_device = CONFIG_SATA_ENV_DEV;
 	}
 
 	if (sata_curr_device >= CONFIG_SYS_SATA_MAX_DEVICE) {
 		printf("Unknown SATA(%d) device for environment!\n",
 			sata_curr_device);
-		return 1;
+		return;
 	}
 	sata = sata_get_dev(sata_curr_device);
 
-	if (read_env(sata, CONFIG_ENV_SIZE, CONFIG_ENV_OFFSET, env_ptr))
+	if (read_env(sata, CONFIG_ENV_SIZE, CONFIG_ENV_OFFSET, buf))
 		return use_default();
 
-	if (crc32(0, env_ptr->data, ENV_SIZE) != env_ptr->crc)
-		return use_default();
+	ret = env_import(buf, 1);
+	if (ret)
+		gd->env_valid = 1;
 
-	gd->env_valid = 1;
 #endif
 }
 
@@ -156,7 +166,6 @@ void env_relocate_spec(void)
 static void use_default()
 {
 	puts("*** Warning - bad CRC or MMC, using default environment\n\n");
-	set_default_env();
+	set_default_env(NULL);
 }
 #endif
-

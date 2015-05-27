@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007-2011 Freescale Semiconductor, Inc.
+ * Copyright 2007 Freescale Semiconductor, Inc.
  *
  * This file is licensed under the terms of the GNU General Public
  * License Version 2. This file is licensed "as is" without any
@@ -20,6 +20,7 @@
 #define CONFIG_CMD_BOOTD	/* bootd			*/
 #define CONFIG_CMD_CONSOLE	/* coninfo			*/
 #define CONFIG_CMD_ECHO		/* echo arguments		*/
+#define CONFIG_CMD_EDITENV	/* editenv			*/
 #define CONFIG_CMD_FPGA		/* FPGA configuration Support	*/
 #define CONFIG_CMD_IMI		/* iminfo			*/
 #define CONFIG_CMD_ITEST	/* Integer (and string) test	*/
@@ -29,7 +30,7 @@
 #endif
 #define CONFIG_CMD_LOADB	/* loadb			*/
 #define CONFIG_CMD_LOADS	/* loads			*/
-#define CONFIG_CMD_MEMORY	/* md mm nm mw cp cmp crc base loop mtest */
+#define CONFIG_CMD_MEMORY	/* md mm nm mw cp cmp crc base loop */
 #define CONFIG_CMD_MISC		/* Misc functions like sleep etc*/
 #define CONFIG_CMD_NET		/* bootp, tftpboot, rarpboot	*/
 #define CONFIG_CMD_NFS		/* NFS support			*/
@@ -38,7 +39,5 @@
 #define CONFIG_CMD_SETGETDCR	/* DCR support on 4xx		*/
 #define CONFIG_CMD_SOURCE	/* "source" command support	*/
 #define CONFIG_CMD_XIMG		/* Load part of Multi Image	*/
-
-#define CONFIG_PARTITIONS	1
 
 #endif	/* _CONFIG_CMD_DEFAULT_H */

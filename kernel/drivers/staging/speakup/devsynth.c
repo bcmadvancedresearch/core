@@ -13,31 +13,32 @@
 static int misc_registered;
 static int dev_opened;
 
-static ssize_t speakup_file_write(struct file *fp, const char *buffer,
-		   size_t nbytes, loff_t *ppos)
+static ssize_t speakup_file_write(struct file *fp, const char __user *buffer,
+				  size_t nbytes, loff_t *ppos)
 {
 	size_t count = nbytes;
-	const char *ptr = buffer;
-	int bytes;
+	const char __user *ptr = buffer;
+	size_t bytes;
 	unsigned long flags;
 	u_char buf[256];
+
 	if (synth == NULL)
 		return -ENODEV;
 	while (count > 0) {
-		bytes = min_t(size_t, count, sizeof(buf));
+		bytes = min(count, sizeof(buf));
 		if (copy_from_user(buf, ptr, bytes))
 			return -EFAULT;
 		count -= bytes;
 		ptr += bytes;
-		spk_lock(flags);
+		spin_lock_irqsave(&speakup_info.spinlock, flags);
 		synth_write(buf, bytes);
-		spk_unlock(flags);
+		spin_unlock_irqrestore(&speakup_info.spinlock, flags);
 	}
 	return (ssize_t) nbytes;
 }
 
-static ssize_t speakup_file_read(struct file *fp, char *buf, size_t nbytes,
-	loff_t *ppos)
+static ssize_t speakup_file_read(struct file *fp, char __user *buf,
+				 size_t nbytes, loff_t *ppos)
 {
 	return 0;
 }

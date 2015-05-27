@@ -40,9 +40,9 @@ extern int  sysctl_slot_timeout;
 extern int  sysctl_fast_poll_increase;
 extern char sysctl_devname[];
 extern int  sysctl_max_baud_rate;
-extern int  sysctl_min_tx_turn_time;
-extern int  sysctl_max_tx_data_size;
-extern int  sysctl_max_tx_window;
+extern unsigned int sysctl_min_tx_turn_time;
+extern unsigned int sysctl_max_tx_data_size;
+extern unsigned int sysctl_max_tx_window;
 extern int  sysctl_max_noreply_time;
 extern int  sysctl_warn_noreply_time;
 extern int  sysctl_lap_keepalive_time;
@@ -73,7 +73,7 @@ static int min_lap_keepalive_time = 100;	/* 100us */
 /* For other sysctl, I've no idea of the range. Maybe Dag could help
  * us on that - Jean II */
 
-static int do_devname(ctl_table *table, int write,
+static int do_devname(struct ctl_table *table, int write,
 		      void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int ret;
@@ -90,7 +90,7 @@ static int do_devname(ctl_table *table, int write,
 }
 
 
-static int do_discovery(ctl_table *table, int write,
+static int do_discovery(struct ctl_table *table, int write,
                     void __user *buffer, size_t *lenp, loff_t *ppos)
 {
        int ret;
@@ -111,7 +111,7 @@ static int do_discovery(ctl_table *table, int write,
 }
 
 /* One file */
-static ctl_table irda_table[] = {
+static struct ctl_table irda_table[] = {
 	{
 		.procname	= "discovery",
 		.data		= &sysctl_discovery,
@@ -235,12 +235,6 @@ static ctl_table irda_table[] = {
 	{ }
 };
 
-static struct ctl_path irda_path[] = {
-	{ .procname = "net", },
-	{ .procname = "irda", },
-	{ }
-};
-
 static struct ctl_table_header *irda_table_header;
 
 /*
@@ -251,7 +245,7 @@ static struct ctl_table_header *irda_table_header;
  */
 int __init irda_sysctl_register(void)
 {
-	irda_table_header = register_sysctl_paths(irda_path, irda_table);
+	irda_table_header = register_net_sysctl(&init_net, "net/irda", irda_table);
 	if (!irda_table_header)
 		return -ENOMEM;
 
@@ -266,7 +260,7 @@ int __init irda_sysctl_register(void)
  */
 void irda_sysctl_unregister(void)
 {
-	unregister_sysctl_table(irda_table_header);
+	unregister_net_sysctl_table(irda_table_header);
 }
 
 

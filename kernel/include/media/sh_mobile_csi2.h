@@ -11,6 +11,8 @@
 #ifndef SH_MIPI_CSI
 #define SH_MIPI_CSI
 
+#include <linux/list.h>
+
 enum sh_csi2_phy {
 	SH_CSI2_PHY_MAIN,
 	SH_CSI2_PHY_SUB,
@@ -31,7 +33,10 @@ struct sh_csi2_client_config {
 	unsigned char lanes;		/* bitmask[3:0] */
 	unsigned char channel;		/* 0..3 */
 	struct platform_device *pdev;	/* client platform device */
+	const char *name;		/* async matching: client name */
 };
+
+struct v4l2_device;
 
 struct sh_csi2_pdata {
 	enum sh_csi2_type type;
@@ -39,8 +44,5 @@ struct sh_csi2_pdata {
 	struct sh_csi2_client_config *clients;
 	int num_clients;
 };
-
-struct device;
-struct v4l2_device;
 
 #endif

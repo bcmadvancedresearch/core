@@ -69,12 +69,23 @@ static unsigned char mincore_page(struct address_space *mapping, pgoff_t pgoff)
 	 * file will not get a swp_entry_t in its pte, but rather it is like
 	 * any other file mapping (ie. marked !present and faulted in with
 	 * tmpfs's .fault). So swapped out tmpfs mappings are tested here.
-	 *
-	 * However when tmpfs moves the page from pagecache and into swapcache,
-	 * it is still in core, but the find_get_page below won't find it.
-	 * No big deal, but make a note of it.
 	 */
+#ifdef CONFIG_SWAP
+	if (shmem_mapping(mapping)) {
+		page = find_get_entry(mapping, pgoff);
+		/*
+		 * shmem/tmpfs may return swap: account for swapcache
+		 * page too.
+		 */
+		if (radix_tree_exceptional_entry(page)) {
+			swp_entry_t swp = radix_to_swp_entry(page);
+			page = find_get_page(swap_address_space(swp), swp.val);
+		}
+	} else
+		page = find_get_page(mapping, pgoff);
+#else
 	page = find_get_page(mapping, pgoff);
+#endif
 	if (page) {
 		present = PageUptodate(page);
 		page_cache_release(page);
@@ -132,7 +143,8 @@ static void mincore_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 			} else {
 #ifdef CONFIG_SWAP
 				pgoff = entry.val;
-				*vec = mincore_page(&swapper_space, pgoff);
+				*vec = mincore_page(swap_address_space(entry),
+					pgoff);
 #else
 				WARN_ON(1);
 				*vec = 1;
@@ -220,13 +232,6 @@ static long do_mincore(unsigned long addr, unsigned long pages, unsigned char *v
 		return -ENOMEM;
 
 	end = min(vma->vm_end, addr + (pages << PAGE_SHIFT));
-
-	if (is_vm_hugetlb_page(vma)) {
-		mincore_hugetlb_page_range(vma, addr, end, vec);
-		return (end - addr) >> PAGE_SHIFT;
-	}
-
-	end = pmd_addr_end(addr, end);
 
 	if (is_vm_hugetlb_page(vma))
 		mincore_hugetlb_page_range(vma, addr, end, vec);

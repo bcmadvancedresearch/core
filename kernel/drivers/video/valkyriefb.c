@@ -56,7 +56,6 @@
 #include <linux/cuda.h>
 #include <asm/io.h>
 #ifdef CONFIG_MAC
-#include <asm/bootinfo.h>
 #include <asm/macintosh.h>
 #else
 #include <asm/prom.h>
@@ -392,7 +391,7 @@ int __init valkyriefb_init(void)
 	if ((err = register_framebuffer(&p->info)) != 0)
 		goto out_cmap_free;
 
-	printk(KERN_INFO "fb%d: valkyrie frame buffer device\n", p->info.node);
+	fb_info(&p->info, "valkyrie frame buffer device\n");
 	return 0;
 
  out_cmap_free:
@@ -555,7 +554,7 @@ static int __init valkyrie_init_info(struct fb_info *info,
 
 
 /*
- * Parse user speficied options (`video=valkyriefb:')
+ * Parse user specified options (`video=valkyriefb:')
  */
 int __init valkyriefb_setup(char *options)
 {

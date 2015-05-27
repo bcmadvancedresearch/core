@@ -2,7 +2,7 @@
  * Copyright 2008 - 2009 (C) Wind River Systems, Inc.
  * Tom Rix <Tom.Rix@windriver.com>
  *
- * Copyright (C) 2010-2012 Freescale Semiconductor, Inc.
+ * Copyright (C) 2010-2014 Freescale Semiconductor, Inc.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -61,28 +61,19 @@
 #include <nand.h>
 #include <fastboot.h>
 #include <environment.h>
+#include <mmc.h>
+
+#if defined(CONFIG_OF_LIBFDT)
+#include <libfdt.h>
+#include <fdt_support.h>
+#endif
+#include <asm/bootm.h>
 
 #ifdef CONFIG_FASTBOOT
 
-/* Use do_reset for fastboot's 'reboot' command */
-extern int do_reset(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[]);
-/* Use do_nand for fastboot's flash commands */
-#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
-extern int do_nand(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[]);
-#elif defined(CONFIG_FASTBOOT_STORAGE_EMMC_SATA)
-extern int do_mmcops(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[]);
-#if defined(CONFIG_CMD_SATA)
-extern int do_sata(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[]);
-#endif
-extern env_t *env_ptr;
-#endif
-extern int do_booti(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[]);
-/* Use do_setenv and do_saveenv to permenantly save data */
-int do_saveenv(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[]);
-int do_setenv(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[]);
-/* Use do_bootm and do_go for fastboot's 'boot' command */
-int do_bootm(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[]);
-int do_go(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[]);
+int do_booti(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[]);
+extern int do_bootm_linux(int flag, int argc,
+	char *argv[], bootm_headers_t *images);
 
 /* Forward decl */
 static int tx_handler(void);
@@ -99,8 +90,6 @@ static struct cmd_fastboot_interface interface = {
 	.transfer_buffer_size  = 0,
 };
 
-extern struct fastboot_device_info fastboot_devinfo;
-
 static unsigned int download_size;
 static unsigned int download_bytes;
 static unsigned int download_bytes_unpadded;
@@ -110,118 +99,60 @@ static unsigned int upload_size;
 static unsigned int upload_bytes;
 static unsigned int upload_error;
 
-/* To support the Android-style naming of flash */
-#define MAX_PTN		    16
 #define MMC_SATA_BLOCK_SIZE 512
 
-static fastboot_ptentry ptable[MAX_PTN];
-static unsigned int pcount;
-static int static_pcount = -1;
-
 #ifdef CONFIG_FASTBOOT_STORAGE_NAND
-static void set_env(char *var, char *val)
-{
-	char *setenv[4]  = { "setenv", NULL, NULL, NULL, };
-
-	setenv[1] = var;
-	setenv[2] = val;
-
-	do_setenv(NULL, 0, 3, setenv);
-}
-
 static void save_env(struct fastboot_ptentry *ptn,
 		     char *var, char *val)
 {
-	char start[32], length[32];
-	char ecc_type[32];
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+	char lock[128], unlock[128];
+#endif
 
-	char *lock[5]    = { "nand", "lock",   NULL, NULL, NULL, };
-	char *unlock[5]  = { "nand", "unlock", NULL, NULL, NULL, };
-	char *ecc[4]     = { "nand", "ecc",    NULL, NULL, };
-	char *saveenv[2] = { "setenv", NULL, };
+	setenv(var, val);
 
-	lock[2] = unlock[2] = start;
-	lock[3] = unlock[3] = length;
-
-	set_env(var, val);
-
-	/* Some flashing requires the nand's ecc to be set */
-	ecc[2] = ecc_type;
-	if ((ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_HW_ECC) &&
-	    (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_SW_ECC))	{
-		/* Both can not be true */
-		printf("Warning can not do hw and sw ecc for partition '%s'\n",
-			 ptn->name);
-		printf("Ignoring these flags\n");
-	} else if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_HW_ECC) {
-		sprintf(ecc_type, "hw");
-		do_nand(NULL, 0, 3, ecc);
-	} else if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_SW_ECC) {
-		sprintf(ecc_type, "sw");
-		do_nand(NULL, 0, 3, ecc);
-	}
-	sprintf(start, "0x%x", ptn->start);
-	sprintf(length, "0x%x", ptn->length);
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+	sprintf(lock, "nand lock 0x%x 0x%x", ptn->start, ptn->length);
+	sprintf(unlock, "nand unlock 0x%x 0x%x", ptn->start, ptn->length);
 
 	/* This could be a problem is there is an outstanding lock */
-	do_nand(NULL, 0, 4, unlock);
-	do_saveenv(NULL, 0, 1, saveenv);
-	do_nand(NULL, 0, 4, lock);
+	run_command(unlock, 0);
+#endif
+	saveenv();
+
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+	run_command(lock, 0);
+#endif
 }
 
-static void save_block_values(struct fastboot_ptentry *ptn,
+void save_parts_values(struct fastboot_ptentry *ptn,
 			      unsigned int offset,
 			      unsigned int size)
 {
-	struct fastboot_ptentry *env_ptn;
-
 	char var[64], val[32];
-	char start[32], length[32];
-	char ecc_type[32];
-
-	char *lock[5]    = { "nand", "lock",   NULL, NULL, NULL, };
-	char *unlock[5]  = { "nand", "unlock", NULL, NULL, NULL, };
-	char *ecc[4]     = { "nand", "ecc",    NULL, NULL, };
-	char *setenv[4]  = { "setenv", NULL, NULL, NULL, };
-	char *saveenv[2] = { "setenv", NULL, };
-
-	setenv[1] = var;
-	setenv[2] = val;
-	lock[2] = unlock[2] = start;
-	lock[3] = unlock[3] = length;
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+	char lock[128], unlock[128];
+	struct fastboot_ptentry *env_ptn;
+#endif
 
 	printf("saving it..\n");
 
-	if (size == 0) {
-		/* The error case, where the variables are being unset */
 
-		sprintf(var, "%s_nand_offset", ptn->name);
-		sprintf(val, "");
-		do_setenv(NULL, 0, 3, setenv);
+	sprintf(var, "%s_nand_offset", ptn->name);
+	sprintf(val, "0x%x", offset);
 
-		sprintf(var, "%s_nand_size", ptn->name);
-		sprintf(val, "");
-		do_setenv(NULL, 0, 3, setenv);
-	} else {
-		/* Normal case */
+	printf("setenv %s %s\n", var, val);
 
-		sprintf(var, "%s_nand_offset", ptn->name);
-		sprintf(val, "0x%x", offset);
+	setenv(var, val);
 
-		printf("%s %s %s\n", setenv[0], setenv[1], setenv[2]);
+	sprintf(var, "%s_nand_size", ptn->name);
+	sprintf(val, "0x%x", size);
 
-		do_setenv(NULL, 0, 3, setenv);
+	printf("setenv %s %s\n", var, val);
 
-		sprintf(var, "%s_nand_size", ptn->name);
+	setenv(var, val);
 
-		sprintf(val, "0x%x", size);
-
-		printf("%s %s %s\n", setenv[0], setenv[1], setenv[2]);
-
-		do_setenv(NULL, 0, 3, setenv);
-	}
-
-
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
 	/* Warning :
 	   The environment is assumed to be in a partition named 'enviroment'.
 	   It is very possible that your board stores the enviroment
@@ -229,54 +160,270 @@ static void save_block_values(struct fastboot_ptentry *ptn,
 	env_ptn = fastboot_flash_find_ptn("environment");
 
 	if (env_ptn) {
-		/* Some flashing requires the nand's ecc to be set */
-		ecc[2] = ecc_type;
-		if ((env_ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_HW_ECC) &&
-		    (env_ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_SW_ECC)) {
-			/* Both can not be true */
-			printf("Warning can not do hw and sw ecc for \
-				partition '%s'\n", ptn->name);
-			printf("Ignoring these flags\n");
-		} else if (env_ptn->flags &
-			    FASTBOOT_PTENTRY_FLAGS_WRITE_HW_ECC) {
-			sprintf(ecc_type, "hw");
-			do_nand(NULL, 0, 3, ecc);
-		} else if (env_ptn->flags &
-			    FASTBOOT_PTENTRY_FLAGS_WRITE_SW_ECC) {
-			sprintf(ecc_type, "sw");
-			do_nand(NULL, 0, 3, ecc);
+		sprintf(lock, "nand lock 0x%x 0x%x",
+			env_ptn->start, env_ptn->length);
+		sprintf(unlock, "nand unlock 0x%x 0x%x",
+			env_ptn->start, env_ptn->length);
+
+		run_command(unlock, 0);
+	}
+#endif
+	saveenv();
+
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+	if (env_ptn)
+		run_command(lock, 0);
+#endif
+}
+
+int check_parts_values(struct fastboot_ptentry *ptn)
+{
+	char var[64];
+
+	sprintf(var, "%s_nand_offset", ptn->name);
+	if (!getenv(var))
+		return 1;
+
+	sprintf(var, "%s_nand_size", ptn->name);
+	if (!getenv(var))
+		return 1;
+
+	return 0;
+}
+
+static int write_to_ptn(struct fastboot_ptentry *ptn)
+{
+	int ret = 1;
+	char length[32];
+	char write_type[32];
+	int repeat, repeat_max;
+
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+	char lock[128];
+	char unlock[128];
+#endif
+	char write[128];
+	char erase[128];
+
+	printf("flashing '%s'\n", ptn->name);
+
+	/* Which flavor of write to use */
+	if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_I)
+		sprintf(write_type, "write.i");
+#ifdef CONFIG_CMD_NAND_TRIMFFS
+	else if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_TRIMFFS)
+		sprintf(write_type, "write.trimffs");
+#endif
+	else
+		sprintf(write_type, "write");
+
+	/* Some flashing requires writing the same data in multiple,
+	   consecutive flash partitions */
+	repeat_max = 1;
+	if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_REPEAT_MASK) {
+		if (ptn->flags &
+		    FASTBOOT_PTENTRY_FLAGS_WRITE_CONTIGUOUS_BLOCK) {
+			printf("Warning can not do both 'contiguous block' "
+				"and 'repeat' writes for for partition '%s'\n", ptn->name);
+			printf("Ignoring repeat flag\n");
+		} else {
+			repeat_max = ptn->flags &
+				FASTBOOT_PTENTRY_FLAGS_REPEAT_MASK;
 		}
-
-		sprintf(start, "0x%x", env_ptn->start);
-		sprintf(length, "0x%x", env_ptn->length);
-
-		/* This could be a problem is there is an outstanding lock */
-		do_nand(NULL, 0, 4, unlock);
 	}
 
-	do_saveenv(NULL, 0, 1, saveenv);
+	/* Unlock the whole partition instead of trying to
+	   manage special cases */
+	sprintf(length, "0x%x", ptn->length * repeat_max);
 
-	if (env_ptn)
-		do_nand(NULL, 0, 4, lock);
-}
-#else
-/* will do later */
+	for (repeat = 0; repeat < repeat_max; repeat++) {
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+		sprintf(lock, "nand lock 0x%x %s",
+			ptn->start + (repeat * ptn->length), length);
+		sprintf(unlock, "nand unlock 0x%x %s",
+			ptn->start + (repeat * ptn->length), length);
+#endif
+		sprintf(erase, "nand erase 0x%x %s",
+			ptn->start + (repeat * ptn->length), length);
+
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+		run_command(unlock, 0);
+#endif
+		run_command(erase, 0);
+
+		if ((ptn->flags &
+		     FASTBOOT_PTENTRY_FLAGS_WRITE_NEXT_GOOD_BLOCK) &&
+		    (ptn->flags &
+		     FASTBOOT_PTENTRY_FLAGS_WRITE_CONTIGUOUS_BLOCK)) {
+			/* Both can not be true */
+			printf("Warning can not do 'next good block' and \
+				'contiguous block' for partition '%s'\n",
+				ptn->name);
+			printf("Ignoring these flags\n");
+		} else if (ptn->flags &
+			   FASTBOOT_PTENTRY_FLAGS_WRITE_NEXT_GOOD_BLOCK) {
+			/* Keep writing until you get a good block
+			   transfer_buffer should already be aligned */
+			if (interface.nand_block_size) {
+				unsigned int blocks = download_bytes /
+					interface.nand_block_size;
+				unsigned int i = 0;
+				unsigned int offset = 0;
+
+				while (i < blocks) {
+					/* Check for overflow */
+					if (offset >= ptn->length)
+						break;
+
+					/* download's address only advance
+					   if last write was successful */
+
+					/* nand's address always advances */
+					sprintf(write, "nand %s 0x%p 0x%x 0x%x", write_type,
+						interface.transfer_buffer +
+						(i * interface.nand_block_size),
+						ptn->start + (repeat * ptn->length) + offset,
+						interface.nand_block_size);
+
+					ret = run_command(write, 0);
+					if (ret)
+						break;
+					else
+						i++;
+
+					/* Go to next nand block */
+					offset += interface.nand_block_size;
+				}
+			} else {
+				printf("Warning nand block size can not be 0 \
+					when using 'next good block' for \
+					partition '%s'\n", ptn->name);
+				printf("Ignoring write request\n");
+			}
+		} else if (ptn->flags &
+			 FASTBOOT_PTENTRY_FLAGS_WRITE_CONTIGUOUS_BLOCK) {
+			/* Keep writing until you get a good block
+			   transfer_buffer should already be aligned */
+			if (interface.nand_block_size) {
+				if (0 == nand_curr_device) {
+					nand_info_t *nand;
+					unsigned long off;
+					unsigned int ok_start;
+
+					nand = &nand_info[nand_curr_device];
+
+					printf("\nDevice %d bad blocks:\n",
+					       nand_curr_device);
+
+					/* Initialize the ok_start to the
+					   start of the partition
+					   Then try to find a block large
+					   enough for the download */
+					ok_start = ptn->start;
+
+					/* It is assumed that the start and
+					   length are multiples of block size */
+					for (off = ptn->start;
+					     off < ptn->start + ptn->length;
+					     off += nand->erasesize) {
+						if (nand_block_isbad(nand, off)) {
+							/* Reset the ok_start
+							   to the next block */
+							ok_start = off +
+								nand->erasesize;
+						}
+
+						/* Check if we have enough
+						   blocks */
+						if ((ok_start - off) >=
+						    download_bytes)
+							break;
+					}
+
+					/* Check if there is enough space */
+					if (ok_start + download_bytes <=
+					    ptn->start + ptn->length) {
+
+						sprintf(write, "nand %s 0x%p 0x%x 0x%x", write_type,
+							interface.transfer_buffer,
+							ok_start,
+							download_bytes);
+
+						ret = run_command(write, 0);
+
+						/* Save the results into an
+						   environment variable on the
+						   format
+						   ptn_name + 'offset'
+						   ptn_name + 'size'  */
+						if (ret) {
+							/* failed */
+							save_parts_values(ptn, ptn->start, 0);
+						} else {
+							/* success */
+							save_parts_values(ptn, ok_start, download_bytes);
+						}
+					} else {
+						printf("Error could not find enough contiguous space "
+							"in partition '%s'\n", ptn->name);
+						printf("Ignoring write request\n");
+					}
+				} else {
+					/* TBD : Generalize flash handling */
+					printf("Error only handling 1 NAND per board");
+					printf("Ignoring write request\n");
+				}
+			} else {
+				printf("Warning nand block size can not be 0 \
+					when using 'continuous block' for \
+					partition '%s'\n", ptn->name);
+				printf("Ignoring write request\n");
+			}
+		} else {
+			/* Normal case */
+			sprintf(write, "nand %s 0x%p 0x%x 0x%x", write_type,
+							interface.transfer_buffer,
+							ptn->start + (repeat * ptn->length),
+							download_bytes);
+#ifdef CONFIG_CMD_NAND_TRIMFFS
+			if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_TRIMFFS) {
+				sprintf(write, "nand %s 0x%p 0x%x 0x%x", write_type,
+							interface.transfer_buffer,
+							ptn->start + (repeat * ptn->length),
+							download_bytes_unpadded);
+			}
 #endif
 
-static void reset_handler ()
-{
-	/* If there was a download going on, bail */
-	download_size = 0;
-	download_bytes = 0;
-	download_bytes_unpadded = 0;
-	download_error = 0;
-	continue_booting = 0;
-	upload_size = 0;
-	upload_bytes = 0;
-	upload_error = 0;
-}
+			ret = run_command(write, 0);
 
-#ifdef CONFIG_FASTBOOT_STORAGE_NAND
+			if (0 == repeat) {
+				if (ret) /* failed */
+					save_parts_values(ptn, ptn->start, 0);
+				else     /* success */
+					save_parts_values(ptn, ptn->start,
+							  download_bytes);
+			}
+		}
+
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+		run_command(lock, 0);
+#endif
+
+		if (ret)
+			break;
+	}
+
+	return ret;
+}
+#else
+static void save_env(struct fastboot_ptentry *ptn,
+		     char *var, char *val)
+{
+	setenv(var, val);
+	saveenv();
+}
+#endif
+
 /* When save = 0, just parse.  The input is unchanged
    When save = 1, parse and do the save.  The input is changed */
 static int parse_env(void *ptn, char *err_string, int save, int debug)
@@ -465,249 +612,511 @@ static int saveenv_to_ptn(struct fastboot_ptentry *ptn, char *err_string)
 	return ret;
 }
 
-static void set_ptn_ecc(struct fastboot_ptentry *ptn)
+
+#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
+
+static void process_flash_nand(const char *cmdbuf, char *response)
 {
-	char ecc_type[32];
-	char *ecc[4] = {"nand", "ecc", NULL, NULL, };
+	if (download_bytes) {
+		struct fastboot_ptentry *ptn;
 
-	/* Some flashing requires the nand's ecc to be set */
-	ecc[2] = ecc_type;
-	if ((ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_HW_ECC) &&
-	    (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_SW_ECC)) {
-		/* Both can not be true */
-		printf("Warning can not do hw and sw ecc for partition '%s'\n",
-		       ptn->name);
-		printf("Ignoring these flags\n");
-	} else if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_HW_ECC) {
-		sprintf(ecc_type, "hw");
-		do_nand(NULL, 0, 3, ecc);
-	} else if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_SW_ECC) {
-		sprintf(ecc_type, "sw");
-		do_nand(NULL, 0, 3, ecc);
-	}
-}
-
-static int write_to_ptn(struct fastboot_ptentry *ptn)
-{
-	int ret = 1;
-	char start[32], length[32];
-	char wstart[32], wlength[32], addr[32];
-	char write_type[32];
-	int repeat, repeat_max;
-
-	char *lock[5]   = { "nand", "lock",   NULL, NULL, NULL, };
-	char *unlock[5] = { "nand", "unlock", NULL, NULL, NULL,	};
-	char *write[6]  = { "nand", "write",  NULL, NULL, NULL, NULL, };
-	char *erase[5]  = { "nand", "erase",  NULL, NULL, NULL, };
-
-	lock[2] = unlock[2] = erase[2] = start;
-	lock[3] = unlock[3] = erase[3] = length;
-
-	write[1] = write_type;
-	write[2] = addr;
-	write[3] = wstart;
-	write[4] = wlength;
-
-	printf("flashing '%s'\n", ptn->name);
-
-	/* Which flavor of write to use */
-	if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_I)
-		sprintf(write_type, "write.i");
-#ifdef CFG_NAND_YAFFS_WRITE
-	else if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_YAFFS)
-		sprintf(write_type, "write.yaffs");
-#endif
-	else
-		sprintf(write_type, "write");
-
-	set_ptn_ecc(ptn);
-
-	/* Some flashing requires writing the same data in multiple,
-	   consecutive flash partitions */
-	repeat_max = 1;
-	if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_REPEAT_MASK) {
-		if (ptn->flags &
-		    FASTBOOT_PTENTRY_FLAGS_WRITE_CONTIGUOUS_BLOCK) {
-			printf("Warning can not do both 'contiguous block' and 'repeat' writes for for partition '%s'\n", ptn->name);
-			printf("Ignoring repeat flag\n");
+		ptn = fastboot_flash_find_ptn(cmdbuf + 6);
+		if (ptn == 0) {
+			sprintf(response, "FAILpartition does not exist");
+		} else if ((download_bytes > ptn->length) &&
+			   !(ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_ENV)) {
+			sprintf(response, "FAILimage too large for partition");
+			/* TODO : Improve check for yaffs write */
 		} else {
-			repeat_max = ptn->flags &
-				FASTBOOT_PTENTRY_FLAGS_REPEAT_MASK;
-		}
-	}
-
-	/* Unlock the whole partition instead of trying to
-	   manage special cases */
-	sprintf(length, "0x%x", ptn->length * repeat_max);
-
-	for (repeat = 0; repeat < repeat_max; repeat++) {
-		sprintf(start, "0x%x", ptn->start + (repeat * ptn->length));
-
-		do_nand(NULL, 0, 4, unlock);
-		do_nand(NULL, 0, 4, erase);
-
-		if ((ptn->flags &
-		     FASTBOOT_PTENTRY_FLAGS_WRITE_NEXT_GOOD_BLOCK) &&
-		    (ptn->flags &
-		     FASTBOOT_PTENTRY_FLAGS_WRITE_CONTIGUOUS_BLOCK)) {
-			/* Both can not be true */
-			printf("Warning can not do 'next good block' and \
-				'contiguous block' for partition '%s'\n",
-				ptn->name);
-			printf("Ignoring these flags\n");
-		} else if (ptn->flags &
-			   FASTBOOT_PTENTRY_FLAGS_WRITE_NEXT_GOOD_BLOCK) {
-			/* Keep writing until you get a good block
-			   transfer_buffer should already be aligned */
-			if (interface.nand_block_size) {
-				unsigned int blocks = download_bytes /
-					interface.nand_block_size;
-				unsigned int i = 0;
-				unsigned int offset = 0;
-
-				sprintf(wlength, "0x%x",
-					interface.nand_block_size);
-				while (i < blocks) {
-					/* Check for overflow */
-					if (offset >= ptn->length)
-						break;
-
-					/* download's address only advance
-					   if last write was successful */
-					sprintf(addr, "0x%p",
-						interface.transfer_buffer +
-						(i * interface.nand_block_size));
-
-					/* nand's address always advances */
-					sprintf(wstart, "0x%x",
-						ptn->start + (repeat * ptn->length) + offset);
-
-					ret = do_nand(NULL, 0, 5, write);
-					if (ret)
-						break;
-					else
-						i++;
-
-					/* Go to next nand block */
-					offset += interface.nand_block_size;
-				}
-			} else {
-				printf("Warning nand block size can not be 0 \
-					when using 'next good block' for \
-					partition '%s'\n", ptn->name);
-				printf("Ignoring write request\n");
-			}
-		} else if (ptn->flags &
-			 FASTBOOT_PTENTRY_FLAGS_WRITE_CONTIGUOUS_BLOCK) {
-			/* Keep writing until you get a good block
-			   transfer_buffer should already be aligned */
-			if (interface.nand_block_size) {
-				if (0 == nand_curr_device) {
-					nand_info_t *nand;
-					unsigned long off;
-					unsigned int ok_start;
-
-					nand = &nand_info[nand_curr_device];
-
-					printf("\nDevice %d bad blocks:\n",
-					       nand_curr_device);
-
-					/* Initialize the ok_start to the
-					   start of the partition
-					   Then try to find a block large
-					   enough for the download */
-					ok_start = ptn->start;
-
-					/* It is assumed that the start and
-					   length are multiples of block size */
-					for (off = ptn->start;
-					     off < ptn->start + ptn->length;
-					     off += nand->erasesize) {
-						if (nand_block_isbad(nand, off)) {
-							/* Reset the ok_start
-							   to the next block */
-							ok_start = off +
-								nand->erasesize;
-						}
-
-						/* Check if we have enough
-						   blocks */
-						if ((ok_start - off) >=
-						    download_bytes)
-							break;
-					}
-
-					/* Check if there is enough space */
-					if (ok_start + download_bytes <=
-					    ptn->start + ptn->length) {
-						sprintf(addr,    "0x%p",
-						interface.transfer_buffer);
-						sprintf(wstart,  "0x%x", ok_start);
-						sprintf(wlength, "0x%x", download_bytes);
-
-						ret = do_nand(NULL, 0, 5, write);
-
-						/* Save the results into an
-						   environment variable on the
-						   format
-						   ptn_name + 'offset'
-						   ptn_name + 'size'  */
-						if (ret) {
-							/* failed */
-							save_block_values(ptn, 0, 0);
-						} else {
-							/* success */
-							save_block_values(ptn, ok_start, download_bytes);
-						}
-					} else {
-						printf("Error could not find enough contiguous space in partition '%s' \n", ptn->name);
-						printf("Ignoring write request\n");
-					}
+			/* Check if this is not really a flash write
+			   but rather a saveenv */
+			if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_ENV) {
+				/* Since the response can only be 64 bytes,
+				   there is no point in having a large error message. */
+				char err_string[32];
+				if (saveenv_to_ptn(ptn, &err_string[0])) {
+					printf("savenv '%s' failed : %s\n",
+						ptn->name, err_string);
+					sprintf(response, "FAIL%s", err_string);
 				} else {
-					/* TBD : Generalize flash handling */
-					printf("Error only handling 1 NAND per board");
-					printf("Ignoring write request\n");
+					printf("partition '%s' saveenv-ed\n", ptn->name);
+					sprintf(response, "OKAY");
 				}
 			} else {
-				printf("Warning nand block size can not be 0 \
-					when using 'continuous block' for \
-					partition '%s'\n", ptn->name);
-				printf("Ignoring write request\n");
-			}
-		} else {
-			/* Normal case */
-			sprintf(addr,    "0x%p", interface.transfer_buffer);
-			sprintf(wstart,  "0x%x", ptn->start +
-				(repeat * ptn->length));
-			sprintf(wlength, "0x%x", download_bytes);
-#ifdef CFG_NAND_YAFFS_WRITE
-			if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_YAFFS)
-				sprintf(wlength, "0x%x",
-					download_bytes_unpadded);
-#endif
-
-			ret = do_nand(NULL, 0, 5, write);
-
-			if (0 == repeat) {
-				if (ret) /* failed */
-					save_block_values(ptn, 0, 0);
-				else     /* success */
-					save_block_values(ptn, ptn->start,
-							  download_bytes);
+				/* Normal case */
+				if (write_to_ptn(ptn)) {
+					printf("flashing '%s' failed\n", ptn->name);
+					sprintf(response, "FAILfailed to flash partition");
+				} else {
+					printf("partition '%s' flashed\n", ptn->name);
+					sprintf(response, "OKAY");
+				}
 			}
 		}
-
-		do_nand(NULL, 0, 4, lock);
-
-		if (ret)
-			break;
+	} else {
+		sprintf(response, "FAILno image downloaded");
 	}
 
-	return ret;
 }
-#else
-/* will do environment writing/saving later */
 #endif
+
+#if defined(CONFIG_FASTBOOT_STORAGE_SATA)
+static void process_flash_sata(const char *cmdbuf, char *response)
+{
+	if (download_bytes) {
+		struct fastboot_ptentry *ptn;
+
+		/* Next is the partition name */
+		ptn = fastboot_flash_find_ptn(cmdbuf + 6);
+		if (ptn == 0) {
+			printf("Partition:'%s' does not exist\n", ptn->name);
+			sprintf(response, "FAILpartition does not exist");
+		} else if ((download_bytes >
+			   ptn->length * MMC_SATA_BLOCK_SIZE) &&
+				!(ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_ENV)) {
+			printf("Image too large for the partition\n");
+			sprintf(response, "FAILimage too large for partition");
+		} else if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_ENV) {
+			/* Since the response can only be 64 bytes,
+			   there is no point in having a large error message. */
+			char err_string[32];
+			if (saveenv_to_ptn(ptn, &err_string[0])) {
+				printf("savenv '%s' failed : %s\n", ptn->name, err_string);
+				sprintf(response, "FAIL%s", err_string);
+			} else {
+				printf("partition '%s' saveenv-ed\n", ptn->name);
+				sprintf(response, "OKAY");
+			}
+		} else {
+			unsigned int temp;
+			char sata_write[128];
+
+			/* block count */
+			temp = (download_bytes +
+				MMC_SATA_BLOCK_SIZE - 1) /
+					MMC_SATA_BLOCK_SIZE;
+
+			sprintf(sata_write, "sata write 0x%x 0x%x 0x%x",
+				(unsigned int)interface.transfer_buffer,
+				ptn->start,
+				temp)
+
+			if (run_command(sata_write, 0)) {
+				printf("Writing '%s' FAILED!\n",
+					 ptn->name);
+				sprintf(response,
+				       "FAIL: Write partition");
+			} else {
+				printf("Writing '%s' DONE!\n",
+					ptn->name);
+				sprintf(response, "OKAY");
+			}
+		}
+	} else {
+		sprintf(response, "FAILno image downloaded");
+	}
+
+}
+#endif
+
+#if defined(CONFIG_FASTBOOT_STORAGE_MMC)
+static void process_flash_mmc(const char *cmdbuf, char *response)
+{
+	if (download_bytes) {
+		struct fastboot_ptentry *ptn;
+
+		/* Next is the partition name */
+		ptn = fastboot_flash_find_ptn(cmdbuf + 6);
+		if (ptn == 0) {
+			printf("Partition:'%s' does not exist\n", ptn->name);
+			sprintf(response, "FAILpartition does not exist");
+		} else if ((download_bytes >
+			   ptn->length * MMC_SATA_BLOCK_SIZE) &&
+				!(ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_ENV)) {
+			printf("Image too large for the partition\n");
+			sprintf(response, "FAILimage too large for partition");
+		} else if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_ENV) {
+			/* Since the response can only be 64 bytes,
+			   there is no point in having a large error message. */
+			char err_string[32];
+			if (saveenv_to_ptn(ptn, &err_string[0])) {
+				printf("savenv '%s' failed : %s\n", ptn->name, err_string);
+				sprintf(response, "FAIL%s", err_string);
+			} else {
+				printf("partition '%s' saveenv-ed\n", ptn->name);
+				sprintf(response, "OKAY");
+			}
+		} else {
+			unsigned int temp;
+
+			char mmc_dev[128];
+			char mmc_write[128];
+			int mmcret;
+
+			printf("writing to partition '%s'\n", ptn->name);
+
+			if (ptn->partition_id != FASTBOOT_MMC_NONE_PARTITION_ID)
+				sprintf(mmc_dev, "mmc dev %x %x",
+					fastboot_devinfo.dev_id, /*slot no*/
+					ptn->partition_id /*part no*/);
+			else
+				sprintf(mmc_dev, "mmc dev %x",
+					fastboot_devinfo.dev_id /*slot no*/);
+
+			/* block count */
+			temp = (download_bytes +
+				    MMC_SATA_BLOCK_SIZE - 1) /
+				    MMC_SATA_BLOCK_SIZE;
+
+			sprintf(mmc_write, "mmc write 0x%x 0x%x 0x%x",
+					(unsigned int)interface.transfer_buffer, /*source*/
+					ptn->start, /*dest*/
+					temp /*length*/);
+
+			printf("Initializing '%s'\n", ptn->name);
+
+			mmcret = run_command(mmc_dev, 0);
+			if (mmcret)
+				sprintf(response, "FAIL:Init of MMC card");
+			else
+				sprintf(response, "OKAY");
+
+			printf("Writing '%s'\n", ptn->name);
+			if (run_command(mmc_write, 0)) {
+				printf("Writing '%s' FAILED!\n", ptn->name);
+				sprintf(response, "FAIL: Write partition");
+			} else {
+				printf("Writing '%s' DONE!\n", ptn->name);
+				sprintf(response, "OKAY");
+			}
+		}
+	} else {
+		sprintf(response, "FAILno image downloaded");
+	}
+}
+
+#endif
+
+static void reset_handler ()
+{
+	/* If there was a download going on, bail */
+	download_size = 0;
+	download_bytes = 0;
+	download_bytes_unpadded = 0;
+	download_error = 0;
+	continue_booting = 0;
+	upload_size = 0;
+	upload_bytes = 0;
+	upload_error = 0;
+}
+
+static void rx_process_getvar(const char *cmdbuf, char *response)
+{
+	int temp_len = 0;
+
+	strcpy(response, "OKAY");
+
+	temp_len = strlen("getvar:");
+	if (!strcmp(cmdbuf + temp_len, "version")) {
+		strcpy(response + 4, FASTBOOT_VERSION);
+	} else if (!strcmp(cmdbuf + temp_len,
+			     "product")) {
+		if (interface.product_name)
+			strcpy(response + 4, interface.product_name);
+
+	} else if (!strcmp(cmdbuf + temp_len,
+			     "serialno")) {
+		if (interface.serial_no)
+			strcpy(response + 4, interface.serial_no);
+
+	} else if (!strcmp(cmdbuf + temp_len,
+			    "downloadsize")) {
+		if (interface.transfer_buffer_size)
+			sprintf(response + 4, "0x%x",
+				interface.transfer_buffer_size);
+	} else {
+		fastboot_getvar(cmdbuf + 7, response + 4);
+	}
+}
+
+static void rx_process_reboot(const char *cmdbuf, char *response)
+{
+	sprintf(response, "OKAY");
+	fastboot_tx_status(response, strlen(response));
+	udelay(1000000); /* 1 sec */
+
+	do_reset(NULL, 0, 0, NULL);
+}
+
+static int rx_process_erase(const char *cmdbuf, char *response)
+{
+#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
+	struct fastboot_ptentry *ptn;
+
+	ptn = fastboot_flash_find_ptn(cmdbuf + 6);
+	if (ptn == 0) {
+		sprintf(response, "FAILpartition does not exist");
+	} else {
+		int status, repeat, repeat_max;
+
+		printf("erasing '%s'\n", ptn->name);
+
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+		char lock[128];
+		char unlock[128];
+#endif
+		char erase[128];
+
+		repeat_max = 1;
+		if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_REPEAT_MASK)
+			repeat_max = ptn->flags & FASTBOOT_PTENTRY_FLAGS_REPEAT_MASK;
+
+		for (repeat = 0; repeat < repeat_max;
+			repeat++) {
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+			sprintf(lock, "nand lock 0x%x 0x%x",
+				ptn->start + (repeat * ptn->length),
+				ptn->length);
+			sprintf(unlock, "nand unlock 0x%x 0x%x",
+				ptn->start + (repeat * ptn->length),
+				ptn->length);
+#endif
+			sprintf(erase, "nand erase 0x%x 0x%x",
+				ptn->start + (repeat * ptn->length),
+				ptn->length);
+
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+			run_command(unlock, 0);
+#endif
+			status = run_command(erase, 0);
+#ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
+			run_command(lock, 0);
+#endif
+
+			if (status)
+				break;
+		}
+
+		if (status) {
+			sprintf(response,
+				   "FAILfailed to erase partition");
+		} else {
+			printf("partition '%s' erased\n", ptn->name);
+			sprintf(response, "OKAY");
+		}
+	}
+	return 0;
+#else
+	printf("Not support erase command for EMMC\n");
+	return -1;
+#endif
+
+}
+
+static void rx_process_flash(const char *cmdbuf, char *response)
+{
+	switch (fastboot_devinfo.type) {
+#if defined(CONFIG_FASTBOOT_STORAGE_SATA)
+	case DEV_SATA:
+		process_flash_sata(cmdbuf, response);
+		break;
+#endif
+#if defined(CONFIG_FASTBOOT_STORAGE_MMC)
+	case DEV_MMC:
+		process_flash_mmc(cmdbuf, response);
+		break;
+#endif
+#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
+	case DEV_NAND:
+		process_flash_nand(cmdbuf, response);
+		break;
+#endif
+	default:
+		printf("Not support flash command for current device %d\n",
+			fastboot_devinfo.type);
+		sprintf(response,
+			   "FAILfailed to flash device");
+		break;
+	}
+}
+
+static void rx_process_boot(const char *cmdbuf, char *response)
+{
+	if ((download_bytes) &&
+		(CFG_FASTBOOT_MKBOOTIMAGE_PAGE_SIZE <
+			download_bytes)) {
+		char start[32];
+		char *booti_args[4] = {"booti",  NULL, "boot", NULL};
+
+		/*
+		 * Use this later to determine if a command line was passed
+		 * for the kernel.
+		 */
+		/* struct fastboot_boot_img_hdr *fb_hdr = */
+		/*	(struct fastboot_boot_img_hdr *) interface.transfer_buffer; */
+
+		/* Skip the mkbootimage header */
+		/* image_header_t *hdr = */
+		/*	(image_header_t *) */
+		/*	&interface.transfer_buffer[CFG_FASTBOOT_MKBOOTIMAGE_PAGE_SIZE]; */
+
+		booti_args[1] = start;
+		sprintf(start, "0x%x", (unsigned int)interface.transfer_buffer);
+
+		/* Execution should jump to kernel so send the response
+		   now and wait a bit.	*/
+		sprintf(response, "OKAY");
+		fastboot_tx_status(response, strlen(response));
+
+		printf("Booting kernel...\n");
+
+
+		/* Reserve for further use, this can
+		 * be more convient for developer. */
+		/* if (strlen ((char *) &fb_hdr->cmdline[0])) */
+		/*	set_env("bootargs", (char *) &fb_hdr->cmdline[0]); */
+
+		/* boot the boot.img */
+		do_booti(NULL, 0, 3, booti_args);
+
+
+	}
+	sprintf(response, "FAILinvalid boot image");
+}
+
+static void rx_process_upload(const char *cmdbuf, char *response)
+{
+#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
+	unsigned int adv, delim_index, len;
+	struct fastboot_ptentry *ptn;
+	unsigned int is_raw = 0;
+
+	/* Is this a raw read ? */
+	if (memcmp(cmdbuf, "uploadraw:", 10) == 0) {
+		is_raw = 1;
+		adv = 10;
+	} else {
+		adv = 7;
+	}
+
+	/* Scan to the next ':' to find when the size starts */
+	len = strlen(cmdbuf);
+	for (delim_index = adv;
+		 delim_index < len; delim_index++) {
+		if (cmdbuf[delim_index] == ':') {
+			/* WARNING, cmdbuf is being modified. */
+			*((char *) &cmdbuf[delim_index]) = 0;
+			break;
+		}
+	}
+
+	ptn = fastboot_flash_find_ptn(cmdbuf + adv);
+	if (ptn == 0) {
+		sprintf(response,
+			"FAILpartition does not exist");
+	} else {
+		/* This is how much the user is expecting */
+		unsigned int user_size;
+		/*
+		 * This is the maximum size needed for
+		 * this partition
+		 */
+		unsigned int size;
+		/* This is the length of the data */
+		unsigned int length;
+		/*
+		 * Used to check previous write of
+		 * the parition
+		 */
+		char env_ptn_length_var[128];
+		char *env_ptn_length_val;
+
+		user_size = 0;
+		if (delim_index < len)
+			user_size =
+				simple_strtoul(cmdbuf + delim_index + 1,
+					NULL, 16);
+
+		/* Make sure output is padded to block size */
+		length = ptn->length;
+		sprintf(env_ptn_length_var,
+			"%s_nand_size", ptn->name);
+		env_ptn_length_val = getenv(env_ptn_length_var);
+		if (env_ptn_length_val) {
+			length =
+				simple_strtoul(env_ptn_length_val,
+					NULL, 16);
+			/* Catch possible problems */
+			if (!length)
+				length = ptn->length;
+		}
+
+		size = length / interface.nand_block_size;
+		size *= interface.nand_block_size;
+		if (length % interface.nand_block_size)
+			size += interface.nand_block_size;
+
+		if (is_raw)
+			size += (size /
+				 interface.nand_block_size) *
+				interface.nand_oob_size;
+
+		if (size > interface.transfer_buffer_size) {
+
+			sprintf(response, "FAILdata too large");
+
+		} else if (user_size == 0) {
+
+			/* Send the data response */
+			sprintf(response, "DATA%08x", size);
+
+		} else if (user_size != size) {
+			/* This is the wrong size */
+			sprintf(response, "FAIL");
+		} else {
+			/*
+			 * This is where the transfer
+			 * buffer is populated
+			 */
+			unsigned char *buf =
+			  interface.transfer_buffer;
+			char read[128];
+
+			/*
+			 * Setting upload_size causes
+			 * transfer to happen in main loop
+			 */
+			upload_size = size;
+			upload_bytes = 0;
+			upload_error = 0;
+
+			/*
+			 * Poison the transfer buffer, 0xff
+			 * is erase value of nand
+			 */
+			memset(buf, 0xff, upload_size);
+
+			/* Which flavor of read to use */
+			if (is_raw)
+				sprintf(read, "nand read.raw 0x%x 0x%x 0x%x",
+					(unsigned int)(interface.transfer_buffer),
+					ptn->start,
+					upload_size);
+			else
+				sprintf(read, "nand read.i 0x%x 0x%x 0x%x",
+					(unsigned int)(interface.transfer_buffer),
+					ptn->start,
+					upload_size);
+
+			run_command(read, 0);
+
+			/* Send the data response */
+			sprintf(response, "DATA%08x", size);
+		}
+	}
+#endif
+
+}
 
 static int tx_handler(void)
 {
@@ -735,12 +1144,11 @@ static int tx_handler(void)
 
 static int rx_handler (const unsigned char *buffer, unsigned int buffer_size)
 {
-	int ret = 1, temp_len = 0;
+	int ret = 1;
 
-	/* Use 65 instead of 64
-	   null gets dropped
-	   strcpy's need the extra byte */
-	char response[65];
+	/*response buffer, Use 65 instead of 64
+	   null gets dropped. strcpy's need the extra byte */
+	char response[FASTBOOT_RESPONSE_SIZE];
 
 	if (download_size) {
 		/* Something to download */
@@ -794,11 +1202,14 @@ static int rx_handler (const unsigned char *buffer, unsigned int buffer_size)
 				if (interface.nand_block_size) {
 					if (download_bytes %
 					    interface.nand_block_size) {
-						unsigned int pad = interface.nand_block_size - (download_bytes % interface.nand_block_size);
+						unsigned int pad =
+							interface.nand_block_size -
+							(download_bytes % interface.nand_block_size);
 						unsigned int i;
 
 						for (i = 0; i < pad; i++) {
-							if (download_bytes >= interface.transfer_buffer_size)
+							if (download_bytes >=
+								interface.transfer_buffer_size)
 								break;
 
 							interface.transfer_buffer[download_bytes] = 0;
@@ -843,14 +1254,8 @@ static int rx_handler (const unsigned char *buffer, unsigned int buffer_size)
 
 		/* reboot
 		   Reboot the board. */
-
 		if (memcmp(cmdbuf, "reboot", 6) == 0) {
-			sprintf(response, "OKAY");
-			fastboot_tx_status(response, strlen(response));
-			udelay(1000000); /* 1 sec */
-
-			do_reset(NULL, 0, 0, NULL);
-
+			rx_process_reboot(cmdbuf, response);
 			/* This code is unreachable,
 			   leave it to make the compiler happy */
 			return 0;
@@ -860,89 +1265,15 @@ static int rx_handler (const unsigned char *buffer, unsigned int buffer_size)
 		   Get common fastboot variables
 		   Board has a chance to handle other variables */
 		if (memcmp(cmdbuf, "getvar:", 7) == 0) {
-			strcpy(response, "OKAY");
-
-			temp_len = strlen("getvar:");
-			if (!strcmp(cmdbuf + temp_len, "version")) {
-				strcpy(response + 4, FASTBOOT_VERSION);
-			} else if (!strcmp(cmdbuf + temp_len,
-					     "product")) {
-				if (interface.product_name)
-					strcpy(response + 4, interface.product_name);
-
-			} else if (!strcmp(cmdbuf + temp_len,
-					     "serialno")) {
-				if (interface.serial_no)
-					strcpy(response + 4, interface.serial_no);
-
-			} else if (!strcmp(cmdbuf + temp_len,
-					    "downloadsize")) {
-				if (interface.transfer_buffer_size)
-					sprintf(response + 4, "0x%x",
-						interface.transfer_buffer_size);
-			} else {
-				fastboot_getvar(cmdbuf + 7, response + 4);
-			}
+			rx_process_getvar(cmdbuf, response);
 			ret = 0;
-
 		}
 
 		/* erase
 		   Erase a register flash partition
 		   Board has to set up flash partitions */
-		if (memcmp(cmdbuf, "erase:", 6) == 0) {
-#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
-			struct fastboot_ptentry *ptn;
-
-			ptn = fastboot_flash_find_ptn(cmdbuf + 6);
-			if (ptn == 0) {
-				sprintf(response, "FAILpartition does not exist");
-			} else {
-				char start[32], length[32];
-				int status, repeat, repeat_max;
-
-				printf("erasing '%s'\n", ptn->name);
-
-				char *lock[5]   = { "nand", "lock",   NULL, NULL, NULL, };
-				char *unlock[5] = { "nand", "unlock", NULL, NULL, NULL,	};
-				char *erase[5]  = { "nand", "erase",  NULL, NULL, NULL, };
-
-				lock[2] = unlock[2] = erase[2] = start;
-				lock[3] = unlock[3] = erase[3] = length;
-
-				repeat_max = 1;
-				if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_REPEAT_MASK)
-					repeat_max = ptn->flags & FASTBOOT_PTENTRY_FLAGS_REPEAT_MASK;
-
-				sprintf(length, "0x%x", ptn->length);
-				for (repeat = 0; repeat < repeat_max;
-					repeat++) {
-					sprintf(start, "0x%x",
-						ptn->start +
-						(repeat * ptn->length));
-
-					do_nand(NULL, 0, 4, unlock);
-					status = do_nand(NULL, 0, 4, erase);
-					do_nand(NULL, 0, 4, lock);
-
-					if (status)
-						break;
-				}
-
-				if (status) {
-					sprintf(response,
-					       "FAILfailed to erase partition");
-				} else {
-					printf("partition '%s' erased\n", ptn->name);
-					sprintf(response, "OKAY");
-				}
-			}
-			ret = 0;
-#else
-			printf("Not support erase command for EMMC\n");
-			ret = -1;
-#endif
-		}
+		if (memcmp(cmdbuf, "erase:", 6) == 0)
+			ret = rx_process_erase(cmdbuf, response);
 
 		/* download
 		   download something ..
@@ -1011,221 +1342,14 @@ static int rx_handler (const unsigned char *buffer, unsigned int buffer_size)
 		*/
 
 		if (memcmp(cmdbuf, "boot", 4) == 0) {
-
-			if ((download_bytes) &&
-			    (CFG_FASTBOOT_MKBOOTIMAGE_PAGE_SIZE <
-				    download_bytes)) {
-				char start[32];
-				char *booti_args[4] = {"booti",  NULL, "boot", NULL};
-
-				/*
-				 * Use this later to determine if a command line was passed
-				 * for the kernel.
-				 */
-				/* struct fastboot_boot_img_hdr *fb_hdr = */
-				/* 	(struct fastboot_boot_img_hdr *) interface.transfer_buffer; */
-
-				/* Skip the mkbootimage header */
-				/* image_header_t *hdr = */
-				/* 	(image_header_t *) */
-				/* 	&interface.transfer_buffer[CFG_FASTBOOT_MKBOOTIMAGE_PAGE_SIZE]; */
-
-				booti_args[1] = start;
-				sprintf(start, "0x%x", (unsigned int)interface.transfer_buffer);
-
-				/* Execution should jump to kernel so send the response
-				   now and wait a bit.  */
-				sprintf(response, "OKAY");
-				fastboot_tx_status(response, strlen(response));
-
-				printf("Booting kernel...\n");
-
-
-				/* Reserve for further use, this can
-				 * be more convient for developer. */
-				/* if (strlen ((char *) &fb_hdr->cmdline[0])) */
-				/* 	set_env("bootargs", (char *) &fb_hdr->cmdline[0]); */
-
-				/* boot the boot.img */
-				do_booti(NULL, 0, 3, booti_args);
-
-
-			}
-			sprintf(response, "FAILinvalid boot image");
+			rx_process_boot(cmdbuf, response);
 			ret = 0;
 		}
 
 		/* flash
 		   Flash what was downloaded */
-
 		if (memcmp(cmdbuf, "flash:", 6) == 0) {
-#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
-			if (download_bytes) {
-				struct fastboot_ptentry *ptn;
-
-				ptn = fastboot_flash_find_ptn(cmdbuf + 6);
-				if (ptn == 0) {
-					sprintf(response, "FAILpartition does not exist");
-				} else if ((download_bytes > ptn->length) &&
-					   !(ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_ENV)) {
-					sprintf(response, "FAILimage too large for partition");
-					/* TODO : Improve check for yaffs write */
-				} else {
-					/* Check if this is not really a flash write
-					   but rather a saveenv */
-					if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_ENV) {
-						/* Since the response can only be 64 bytes,
-						   there is no point in having a large error message. */
-						char err_string[32];
-						if (saveenv_to_ptn(ptn, &err_string[0])) {
-							printf("savenv '%s' failed : %s\n", ptn->name, err_string);
-							sprintf(response, "FAIL%s", err_string);
-						} else {
-							printf("partition '%s' saveenv-ed\n", ptn->name);
-							sprintf(response, "OKAY");
-						}
-					} else {
-						/* Normal case */
-						if (write_to_ptn(ptn)) {
-							printf("flashing '%s' failed\n", ptn->name);
-							sprintf(response, "FAILfailed to flash partition");
-						} else {
-							printf("partition '%s' flashed\n", ptn->name);
-							sprintf(response, "OKAY");
-						}
-					}
-				}
-			} else {
-				sprintf(response, "FAILno image downloaded");
-			}
-#elif defined(CONFIG_FASTBOOT_STORAGE_EMMC_SATA)
-			if (download_bytes) {
-				struct fastboot_ptentry *ptn;
-
-				/* Next is the partition name */
-				ptn = fastboot_flash_find_ptn(cmdbuf + 6);
-				if (ptn == 0) {
-					printf("Partition:'%s' does not exist\n", ptn->name);
-					sprintf(response, "FAILpartition does not exist");
-				} else if ((download_bytes >
-					   ptn->length * MMC_SATA_BLOCK_SIZE) &&
-						!(ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_ENV)) {
-					printf("Image too large for the partition\n");
-					sprintf(response, "FAILimage too large for partition");
-				} else if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_ENV) {
-					/* Check if this is not really a flash write,
-					 * but instead a saveenv
-					 */
-					unsigned int i = 0;
-					/* Env file is expected with a NULL delimeter between
-					 * env variables So replace New line Feeds (0x0a) with
-					 * NULL (0x00)
-					 */
-					printf("Goto write env, flags=0x%x\n",
-						    ptn->flags);
-					for (i = 0; i < download_bytes; i++) {
-						if (interface.transfer_buffer[i] == 0x0a)
-							interface.transfer_buffer[i] = 0x00;
-					}
-					memset(env_ptr->data, 0, ENV_SIZE);
-					memcpy(env_ptr->data, interface.transfer_buffer, download_bytes);
-					do_saveenv(NULL, 0, 1, NULL);
-					printf("saveenv to '%s' DONE!\n", ptn->name);
-					sprintf(response, "OKAY");
-				} else {
-					char source[32], dest[32];
-					char length[32], slot_no[32];
-					char part_no[32];
-					unsigned int temp;
-
-					/* Normal case */
-					if (fastboot_devinfo.type == DEV_MMC)
-						/* download to mmc */
-						goto mmc_ops;
-					else {
-						/* downaload to sata */
-#ifdef CONFIG_CMD_SATA
-					char *sata_write[5] = {"sata", "write",
-						NULL, NULL, NULL};
-
-					sata_write[2] = source;
-					sata_write[3] = dest;
-					sata_write[4] = length;
-
-					sprintf(source, "0x%x",
-						 (unsigned int)interface.transfer_buffer);
-					/* block offset */
-					sprintf(dest, "0x%x", ptn->start);
-					/* block count */
-					temp = (download_bytes +
-						MMC_SATA_BLOCK_SIZE - 1) /
-							MMC_SATA_BLOCK_SIZE;
-					sprintf(length, "0x%x", temp);
-					if (do_sata(NULL, 0, 5, sata_write)) {
-						printf("Writing '%s' FAILED!\n",
-							 ptn->name);
-						sprintf(response,
-						       "FAIL: Write partition");
-					} else {
-						printf("Writing '%s' DONE!\n",
-							ptn->name);
-						sprintf(response, "OKAY");
-						ret = 0;
-					}
-#else
-					sprintf(response, "FAIL: Not support");
-#endif
-					fastboot_tx_status(response,
-							    strlen(response));
-					return ret; /* End of sata download */
-				}
-
-mmc_ops:
-					printf("writing to partition '%s'\n", ptn->name);
-					char *mmc_write[5] = {"mmc", "write",
-						NULL, NULL, NULL};
-					char *mmc_dev[4] = {"mmc", "dev", NULL, NULL};
-
-					mmc_dev[2] = slot_no;
-					mmc_dev[3] = part_no;
-					mmc_write[2] = source;
-					mmc_write[3] = dest;
-					mmc_write[4] = length;
-
-					sprintf(slot_no, "%d",
-						    fastboot_devinfo.dev_id);
-					sprintf(source, "0x%x", (unsigned int)interface.transfer_buffer);
-					/* partition no */
-					sprintf(part_no, "%d",
-						    ptn->partition_id);
-					/* block offset */
-					sprintf(dest, "0x%x", ptn->start);
-					/* block count */
-					temp = (download_bytes +
-						    MMC_SATA_BLOCK_SIZE - 1) /
-						    MMC_SATA_BLOCK_SIZE;
-					sprintf(length, "0x%x", temp);
-
-					printf("Initializing '%s'\n", ptn->name);
-					if (do_mmcops(NULL, 0, 4, mmc_dev))
-						sprintf(response, "FAIL:Init of MMC card");
-					else
-						sprintf(response, "OKAY");
-
-					printf("Writing '%s'\n", ptn->name);
-					if (do_mmcops(NULL, 0, 5, mmc_write)) {
-						printf("Writing '%s' FAILED!\n", ptn->name);
-						sprintf(response, "FAIL: Write partition");
-					} else {
-						printf("Writing '%s' DONE!\n", ptn->name);
-						sprintf(response, "OKAY");
-					}
-				}
-
-		} else {
-			sprintf(response, "FAILno image downloaded");
-		}
-#endif
+			rx_process_flash(cmdbuf, response);
 			ret = 0;
 		}
 
@@ -1241,144 +1365,7 @@ mmc_ops:
 		   Upload just the data in a partition */
 		if ((memcmp(cmdbuf, "upload:", 7) == 0) ||
 		    (memcmp(cmdbuf, "uploadraw:", 10) == 0)) {
-#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
-			unsigned int adv, delim_index, len;
-			struct fastboot_ptentry *ptn;
-			unsigned int is_raw = 0;
-
-			/* Is this a raw read ? */
-			if (memcmp(cmdbuf, "uploadraw:", 10) == 0) {
-				is_raw = 1;
-				adv = 10;
-			} else {
-				adv = 7;
-			}
-
-			/* Scan to the next ':' to find when the size starts */
-			len = strlen(cmdbuf);
-			for (delim_index = adv;
-			     delim_index < len; delim_index++) {
-				if (cmdbuf[delim_index] == ':') {
-					/* WARNING, cmdbuf is being modified. */
-					*((char *) &cmdbuf[delim_index]) = 0;
-					break;
-				}
-			}
-
-			ptn = fastboot_flash_find_ptn(cmdbuf + adv);
-			if (ptn == 0) {
-				sprintf(response,
-					"FAILpartition does not exist");
-			} else {
-				/* This is how much the user is expecting */
-				unsigned int user_size;
-				/*
-				 * This is the maximum size needed for
-				 * this partition
-				 */
-				unsigned int size;
-				/* This is the length of the data */
-				unsigned int length;
-				/*
-				 * Used to check previous write of
-				 * the parition
-				 */
-				char env_ptn_length_var[128];
-				char *env_ptn_length_val;
-
-				user_size = 0;
-				if (delim_index < len)
-					user_size =
-					  simple_strtoul(cmdbuf + delim_index +
-							 1, NULL, 16);
-
-				/* Make sure output is padded to block size */
-				length = ptn->length;
-				sprintf(env_ptn_length_var,
-					"%s_nand_size", ptn->name);
-				env_ptn_length_val = getenv(env_ptn_length_var);
-				if (env_ptn_length_val) {
-					length =
-					  simple_strtoul(env_ptn_length_val,
-							 NULL, 16);
-					/* Catch possible problems */
-					if (!length)
-						length = ptn->length;
-				}
-
-				size = length / interface.nand_block_size;
-				size *= interface.nand_block_size;
-				if (length % interface.nand_block_size)
-					size += interface.nand_block_size;
-
-				if (is_raw)
-					size += (size /
-						 interface.nand_block_size) *
-						interface.nand_oob_size;
-
-				if (size > interface.transfer_buffer_size) {
-
-					sprintf(response, "FAILdata too large");
-
-				} else if (user_size == 0) {
-
-					/* Send the data response */
-					sprintf(response, "DATA%08x", size);
-
-				} else if (user_size != size) {
-					/* This is the wrong size */
-					sprintf(response, "FAIL");
-				} else {
-					/*
-					 * This is where the transfer
-					 * buffer is populated
-					 */
-					unsigned char *buf =
-					  interface.transfer_buffer;
-					char start[32], length[32], type[32],
-					  addr[32];
-					char *read[6] = { "nand", NULL, NULL,
-							  NULL, NULL, NULL, };
-
-					/*
-					 * Setting upload_size causes
-					 * transfer to happen in main loop
-					 */
-					upload_size = size;
-					upload_bytes = 0;
-					upload_error = 0;
-
-					/*
-					 * Poison the transfer buffer, 0xff
-					 * is erase value of nand
-					 */
-					memset(buf, 0xff, upload_size);
-
-					/* Which flavor of read to use */
-					if (is_raw)
-						sprintf(type, "read.raw");
-					else
-						sprintf(type, "read.i");
-
-					sprintf(addr, "0x%x",
-						interface.transfer_buffer);
-					sprintf(start, "0x%x", ptn->start);
-					sprintf(length, "0x%x", upload_size);
-
-					read[1] = type;
-					read[2] = addr;
-					read[3] = start;
-					read[4] = length;
-
-					set_ptn_ecc(ptn);
-
-					do_nand(NULL, 0, 5, read);
-
-					/* Send the data response */
-					sprintf(response, "DATA%08x", size);
-				}
-			}
-#endif
+			rx_process_upload(cmdbuf, response);
 			ret = 0;
 		}
 
@@ -1389,246 +1376,13 @@ mmc_ops:
 	return ret;
 }
 
-static int check_against_static_partition(struct fastboot_ptentry *ptn)
-{
-	int ret = 0;
-	struct fastboot_ptentry *c;
-	int i;
-
-	for (i = 0; i < static_pcount; i++) {
-		c = fastboot_flash_get_ptn((unsigned int) i);
-
-		if (0 == ptn->length)
-			break;
-
-		if ((ptn->start >= c->start) &&
-		    (ptn->start < c->start + c->length))
-			break;
-
-		if ((ptn->start + ptn->length > c->start) &&
-		    (ptn->start + ptn->length <= c->start + c->length))
-			break;
-
-		if ((0 == strcmp(ptn->name, c->name)) &&
-		    (0 == strcmp(c->name, ptn->name)))
-			break;
-	}
-
-	if (i >= static_pcount)
-		ret = 1;
-	return ret;
-}
-
-static unsigned long long memparse(char *ptr, char **retptr)
-{
-	char *endptr;	/* local pointer to end of parsed string */
-
-	unsigned long ret = simple_strtoul(ptr, &endptr, 0);
-
-	switch (*endptr) {
-	case 'M':
-	case 'm':
-		ret <<= 10;
-	case 'K':
-	case 'k':
-		ret <<= 10;
-		endptr++;
-	default:
-		break;
-	}
-
-	if (retptr)
-		*retptr = endptr;
-
-	return ret;
-}
-
-static int add_partition_from_environment(char *s, char **retptr)
-{
-	unsigned long size;
-	unsigned long offset = 0;
-	char *name;
-	int name_len;
-	int delim;
-	unsigned int flags;
-	struct fastboot_ptentry part;
-
-	size = memparse(s, &s);
-	if (0 == size) {
-		printf("Error:FASTBOOT size of parition is 0\n");
-		return 1;
-	}
-
-	/* fetch partition name and flags */
-	flags = 0; /* this is going to be a regular partition */
-	delim = 0;
-	/* check for offset */
-	if (*s == '@') {
-		s++;
-		offset = memparse(s, &s);
-	} else {
-		printf("Error:FASTBOOT offset of parition is not given\n");
-		return 1;
-	}
-
-	/* now look for name */
-	if (*s == '(')
-		delim = ')';
-
-	if (delim) {
-		char *p;
-
-		name = ++s;
-		p = strchr((const char *)name, delim);
-		if (!p) {
-			printf("Error:FASTBOOT no closing %c found in partition name\n", delim);
-			return 1;
-		}
-		name_len = p - name;
-		s = p + 1;
-	} else {
-		printf("Error:FASTBOOT no partition name for \'%s\'\n", s);
-		return 1;
-	}
-
-	/* test for options */
-	while (1) {
-		if (strncmp(s, "i", 1) == 0) {
-			flags |= FASTBOOT_PTENTRY_FLAGS_WRITE_I;
-			s += 1;
-		} else if (strncmp(s, "yaffs", 5) == 0) {
-			/* yaffs */
-			flags |= FASTBOOT_PTENTRY_FLAGS_WRITE_YAFFS;
-			s += 5;
-		} else if (strncmp(s, "swecc", 5) == 0) {
-			/* swecc */
-			flags |= FASTBOOT_PTENTRY_FLAGS_WRITE_SW_ECC;
-			s += 5;
-		} else if (strncmp(s, "hwecc", 5) == 0) {
-			/* hwecc */
-			flags |= FASTBOOT_PTENTRY_FLAGS_WRITE_HW_ECC;
-			s += 5;
-		} else {
-			break;
-		}
-		if (strncmp(s, "|", 1) == 0)
-			s += 1;
-	}
-
-	/* enter this partition (offset will be calculated later if it is zero at this point) */
-	part.length = size;
-	part.start = offset;
-	part.flags = flags;
-
-	if (name) {
-		if (name_len >= sizeof(part.name)) {
-			printf("Error:FASTBOOT partition name is too long\n");
-			return 1;
-		}
-		strncpy(&part.name[0], name, name_len);
-		/* name is not null terminated */
-		part.name[name_len] = '\0';
-	} else {
-		printf("Error:FASTBOOT no name\n");
-		return 1;
-	}
-
-
-	/* Check if this overlaps a static partition */
-	if (check_against_static_partition(&part)) {
-		printf("Adding: %s, offset 0x%8.8x, size 0x%8.8x, flags 0x%8.8x\n",
-		       part.name, part.start, part.length, part.flags);
-		fastboot_flash_add_ptn(&part);
-	}
-
-	/* return (updated) pointer command line string */
-	*retptr = s;
-
-	/* return partition table */
-	return 0;
-}
-
-
-
-int do_fastboot (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
+int do_fastboot(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 {
 	int ret = 1;
-	char fbparts[4096], *env;
 	int check_timeout = 0;
 	uint64_t timeout_endtime = 0;
 	uint64_t timeout_ticks = 1000;
-	long timeout_seconds = -1;
 	int continue_from_disconnect = 0;
-
-	/*
-	 * Place the runtime partitions at the end of the
-	 * static paritions.  First save the start off so
-	 * it can be saved from run to run.
-	 */
-	if (static_pcount >= 0) {
-		/* Reset */
-		pcount = static_pcount;
-	} else {
-		/* Save */
-		static_pcount = pcount;
-	}
-	env = getenv("fbparts");
-	if (env) {
-		unsigned int len;
-		len = strlen(env);
-		if (len && len < 4096) {
-			char *s, *e;
-
-			memcpy(&fbparts[0], env, len + 1);
-			printf("Fastboot: Adding partitions from environment\n");
-			s = &fbparts[0];
-			e = s + len;
-			while (s < e) {
-				if (add_partition_from_environment(s, &s)) {
-					printf("Error:Fastboot: Abort adding partitions\n");
-					/* reset back to static */
-					pcount = static_pcount;
-					break;
-				}
-				/* Skip a bunch of delimiters */
-				while (s < e) {
-					if ((' ' == *s) ||
-					    ('\t' == *s) ||
-					    ('\n' == *s) ||
-					    ('\r' == *s) ||
-					    (',' == *s)) {
-						s++;
-					} else {
-						break;
-					}
-				}
-			}
-		}
-	}
-
-	/* Time out */
-	if (2 == argc) {
-		long try_seconds;
-		char *try_seconds_end;
-
-		if (argv[1][0] == 'q') {
-			if ((argv[1][1] >= '0') && (argv[1][1] <= '2'))
-				fastboot_quick(argv[1][1] - '0');
-			else
-				fastboot_quick(0);
-		}
-
-
-		/* Check for timeout */
-		try_seconds = simple_strtol(argv[1],
-					    &try_seconds_end, 10);
-		if ((try_seconds_end != argv[1]) &&
-		    (try_seconds >= 0)) {
-			check_timeout = 1;
-			timeout_seconds = try_seconds;
-			printf("Fastboot inactivity timeout %ld seconds\n", timeout_seconds);
-		}
-	}
 
 	do {
 		continue_from_disconnect = 0;
@@ -1717,163 +1471,357 @@ U_BOOT_CMD(
 );
 
 
-/*
- * Android style flash utilties */
-void fastboot_flash_add_ptn(fastboot_ptentry *ptn)
+#ifdef CONFIG_CMD_BOOTI
+  /* Section for Android bootimage format support
+   * Refer:
+   * http://android.git.kernel.org/?p=platform/system/core.git;a=blob;
+   * f=mkbootimg/bootimg.h
+   */
+
+void
+bootimg_print_image_hdr(struct fastboot_boot_img_hdr *hdr)
 {
-	if (pcount < MAX_PTN) {
-		memcpy(ptable + pcount, ptn, sizeof(fastboot_ptentry));
-		pcount++;
-	}
+#ifdef DEBUG
+	int i;
+	printf("   Image magic:   %s\n", hdr->magic);
+
+	printf("   kernel_size:   0x%x\n", hdr->kernel_size);
+	printf("   kernel_addr:   0x%x\n", hdr->kernel_addr);
+
+	printf("   rdisk_size:   0x%x\n", hdr->ramdisk_size);
+	printf("   rdisk_addr:   0x%x\n", hdr->ramdisk_addr);
+
+	printf("   second_size:   0x%x\n", hdr->second_size);
+	printf("   second_addr:   0x%x\n", hdr->second_addr);
+
+	printf("   tags_addr:   0x%x\n", hdr->tags_addr);
+	printf("   page_size:   0x%x\n", hdr->page_size);
+
+	printf("   name:      %s\n", hdr->name);
+	printf("   cmdline:   %s%x\n", hdr->cmdline);
+
+	for (i = 0; i < 8; i++)
+		printf("   id[%d]:   0x%x\n", i, hdr->id[i]);
+#endif
 }
 
-void fastboot_flash_dump_ptn(void)
+static struct fastboot_boot_img_hdr boothdr __aligned(ARCH_DMA_MINALIGN);
+
+#define ALIGN_SECTOR(n, pagesz) ((n + (pagesz - 1)) & (~(pagesz - 1)))
+
+#ifdef CONFIG_LMB
+static void boot_start_lmb(bootm_headers_t *images)
 {
-	unsigned int n;
-	for (n = 0; n < pcount; n++) {
-		fastboot_ptentry *ptn = ptable + n;
-		printf("ptn %d name='%s' start=%d len=%d\n",
-			n, ptn->name, ptn->start, ptn->length);
-	}
+	ulong		mem_start;
+	phys_size_t	mem_size;
+
+	lmb_init(&images->lmb);
+
+	mem_start = getenv_bootm_low();
+	mem_size = getenv_bootm_size();
+
+	lmb_add(&images->lmb, (phys_addr_t)mem_start, mem_size);
+
+	arch_lmb_reserve(&images->lmb);
+	board_lmb_reserve(&images->lmb);
 }
+#else
+#define lmb_reserve(lmb, base, size)
+static inline void boot_start_lmb(bootm_headers_t *images) { }
+#endif
 
-
-fastboot_ptentry *fastboot_flash_find_ptn(const char *name)
+/* Allow for arch specific config before we boot */
+static void __arch_preboot_os(void)
 {
-	unsigned int n;
-
-	for (n = 0; n < pcount; n++) {
-		/* Make sure a substring is not accepted */
-		if (strlen(name) == strlen(ptable[n].name)) {
-			if (0 == strcmp(ptable[n].name, name))
-				return ptable + n;
-		}
-	}
-
-	printf("can't find partition: %s, dump the partition table\n", name);
-	fastboot_flash_dump_ptn();
-	return 0;
+	/* please define platform specific arch_preboot_os() */
 }
+void arch_preboot_os(void) __attribute__((weak, alias("__arch_preboot_os")));
 
-fastboot_ptentry *fastboot_flash_get_ptn(unsigned int n)
+/* booti <addr> [ mmc0 | mmc1 [ <partition> ] ] */
+int do_booti(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 {
-	if (n < pcount)
-		return ptable + n;
+	unsigned addr = 0;
+	char *ptn = "boot";
+	int mmcc = -1;
+	struct fastboot_boot_img_hdr *hdr = &boothdr;
+#ifdef CONFIG_SECURE_BOOT
+    u_int32_t load_addr;
+    uint32_t image_size;
+#endif
+	int i = 0;
+	bootm_headers_t images;
+
+	for (i = 0; i < argc; i++)
+		printf("%s ", argv[i]);
+	printf("\n");
+
+	if (argc < 2)
+		return -1;
+
+	if (!strncmp(argv[1], "mmc", 3))
+		mmcc = simple_strtoul(argv[1]+3, NULL, 10);
 	else
-		return 0;
-}
+		addr = simple_strtoul(argv[1], NULL, 16);
 
-unsigned int fastboot_flash_get_ptn_count(void)
-{
-	return pcount;
-}
+	if (argc > 2)
+		ptn = argv[2];
 
-int fastboot_write_storage(u8 *partition_name, u32 write_len)
-{
-	struct fastboot_ptentry *ptn;
-	u32 storage_len = 0;
+	if (mmcc != -1) {
+#ifdef CONFIG_MMC
+		struct fastboot_ptentry *pte;
+		struct mmc *mmc;
+		disk_partition_t info;
+		block_dev_desc_t *dev_desc = NULL;
+		unsigned sector;
 
-	if (0 == write_len) {
-		DBG_ERR("WriteMMC with 0 lenght\n");
-		return -1;
-	}
-
-	ptn = fastboot_flash_find_ptn((const char *)partition_name);
-	if (!ptn) {
-		DBG_ERR("Partition:'%s' does not exist\n", partition_name);
-		return -1;
-	}
-
-	if (ptn->flags & FASTBOOT_PTENTRY_FLAGS_WRITE_ENV) {
-		DBG_ERR("ENV Write, None image partition, failed\n");
-		return -1;
-	}
-
-	DBG_DEBUG("PTN name=%s, start=0x%x, len=0x%x, flags=0x%x, id=0x%x\n",
-	ptn->name, ptn->start, ptn->length, ptn->flags, ptn->partition_id);
-
-#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
-	storage_len = ptn->length;
-#elif defined(CONFIG_FASTBOOT_STORAGE_EMMC_SATA)
-	storage_len = ptn->length * MMC_SATA_BLOCK_SIZE;
-#endif
-
-	if (write_len > storage_len) {
-		DBG_ERR("Write len big than part volume. 0x%x:0x%x\n",
-						write_len, storage_len);
-		return -1;
-	}
-
-#if defined(CONFIG_FASTBOOT_STORAGE_NAND)
-	DBG_ALWS("Writing nand %s...", ptn->name);
-	download_bytes_unpadded = download_bytes = write_len;
-	if (interface.nand_block_size) {
-		if (download_bytes %
-		    interface.nand_block_size) {
-			unsigned int pad = interface.nand_block_size -
-				(download_bytes % interface.nand_block_size);
-			unsigned int i;
-
-			for (i = 0; i < pad; i++) {
-				if (download_bytes >=
-					interface.transfer_buffer_size)
-					break;
-
-				interface.transfer_buffer[download_bytes] = 0;
-				download_bytes++;
-			}
+		memset((void *)&info, 0 , sizeof(disk_partition_t));
+		/* i.MX use MBR as partition table, so this will have
+		   to find the start block and length for the
+		   partition name and register the fastboot pte we
+		   define the partition number of each partition in
+		   config file
+		 */
+		mmc = find_mmc_device(mmcc);
+		if (!mmc) {
+			printf("booti: cannot find '%d' mmc device\n", mmcc);
+			goto fail;
 		}
-	}
+		dev_desc = get_dev("mmc", mmcc);
+		if (NULL == dev_desc) {
+			printf("** Block device MMC %d not supported\n", mmcc);
+			goto fail;
+		}
 
-	if (write_to_ptn(ptn)) {
-		DBG_ERR("Write to nand %s failed\n", ptn->name);
+		/* below was i.MX mmc operation code */
+		if (mmc_init(mmc)) {
+			printf("mmc%d init failed\n", mmcc);
+			goto fail;
+		}
+
+		pte = fastboot_flash_find_ptn(ptn);
+		if (!pte) {
+			printf("booti: cannot find '%s' partition\n", ptn);
+			goto fail;
+		}
+
+		if (mmc->block_dev.block_read(mmcc, pte->start,
+					      1, (void *)hdr) < 0) {
+			printf("booti: mmc failed to read bootimg header\n");
+			goto fail;
+		}
+
+		if (memcmp(hdr->magic, FASTBOOT_BOOT_MAGIC, 8)) {
+			printf("booti: bad boot image magic\n");
+			goto fail;
+		}
+
+		sector = pte->start + (hdr->page_size / 512);
+
+		if (mmc->block_dev.block_read(mmcc, sector,
+						(hdr->kernel_size / 512) + 1,
+						(void *)hdr->kernel_addr) < 0) {
+			printf("booti: mmc failed to read kernel\n");
+			goto fail;
+		}
+		/* flush cache after read */
+		flush_cache((ulong)hdr->kernel_addr, hdr->kernel_size); /* FIXME */
+		sector += ALIGN_SECTOR(hdr->kernel_size, hdr->page_size) / 512;
+		if (mmc->block_dev.block_read(mmcc, sector,
+						(hdr->ramdisk_size / 512) + 1,
+						(void *)hdr->ramdisk_addr) < 0) {
+			printf("booti: mmc failed to read ramdisk\n");
+			goto fail;
+		}
+		/* flush cache after read */
+		flush_cache((ulong)hdr->ramdisk_addr, hdr->ramdisk_size); /* FIXME */
+
+#ifdef CONFIG_OF_LIBFDT
+		/* load the dtb file */
+		if (hdr->second_size && hdr->second_addr) {
+			sector += ALIGN_SECTOR(hdr->ramdisk_size, hdr->page_size) / 512;
+			if (mmc->block_dev.block_read(mmcc, sector,
+						(hdr->second_size / 512) + 1,
+						(void *)hdr->second_addr) < 0) {
+				printf("booti: mmc failed to dtb\n");
+				goto fail;
+			}
+			/* flush cache after read */
+			flush_cache((ulong)hdr->second_addr, hdr->second_size); /* FIXME */
+		}
+#endif /*CONFIG_OF_LIBFDT*/
+
+#else /*! CONFIG_MMC*/
 		return -1;
+#endif /*! CONFIG_MMC*/
 	} else {
-		DBG_ALWS("Write to nand %s done\n", ptn->name);
-		return write_len;
-	}
-#elif defined(CONFIG_FASTBOOT_STORAGE_EMMC_SATA)
-{
-    char source[32], dest[32], length[32];
-    char part_no[32], slot_no[32];
-    unsigned int temp;
-
-    char *mmc_write[5] = {"mmc", "write", source, dest, length};
-    char *mmc_dev[4] = {"mmc", "dev", slot_no, part_no};
-
-    memset(source,  0, sizeof(source));
-    memset(dest,    0, sizeof(dest));
-    memset(length,  0, sizeof(length));
-    memset(part_no, 0, sizeof(part_no));
-    memset(slot_no, 0, sizeof(slot_no));
-
-    sprintf(slot_no, "%d", fastboot_devinfo.dev_id);
-    sprintf(part_no, "%d", ptn->partition_id);
-
-    DBG_ALWS("Init MMC%s(%s)...\n", slot_no,  ptn->name);
-    if (do_mmcops(NULL, 0, 4, mmc_dev)) {
-	DBG_ERR("MMC%s(%s) init fail\n", slot_no, ptn->name);
-	return -1;
-    } else {
-	DBG_ALWS("MMC%s(%s) init done\n", slot_no, ptn->name);
-    }
-
-    sprintf(source, "0x%x", CONFIG_FASTBOOT_TRANSFER_BUF);
-    sprintf(dest, "0x%x", ptn->start);
-    temp = (write_len + MMC_SATA_BLOCK_SIZE - 1) / MMC_SATA_BLOCK_SIZE;
-    sprintf(length, "0x%x", temp);
-
-    DBG_ALWS("Writing MMC%s(%s), %u blocks...", slot_no, ptn->name, temp);
-
-    if (do_mmcops(NULL, 0, 5, mmc_write)) {
-	DBG_ERR("MMC%s(%s) write fail\n", slot_no, ptn->name);
-	return -1;
-    } else {
-	DBG_ALWS("MMC%s(%s) write done\n", slot_no, ptn->name);
-	return write_len;
-    }
-}
+		unsigned kaddr, raddr, end;
+#ifdef CONFIG_OF_LIBFDT
+		unsigned fdtaddr = 0;
 #endif
+
+		/* set this aside somewhere safe */
+		memcpy(hdr, (void *) addr, sizeof(*hdr));
+
+		if (memcmp(hdr->magic, FASTBOOT_BOOT_MAGIC, 8)) {
+			printf("booti: bad boot image magic\n");
+			return 1;
+		}
+
+		bootimg_print_image_hdr(hdr);
+
+		kaddr = addr + hdr->page_size;
+		raddr = kaddr + ALIGN_SECTOR(hdr->kernel_size, hdr->page_size);
+		end = raddr + hdr->ramdisk_size;
+#ifdef CONFIG_OF_LIBFDT
+		if (hdr->second_size) {
+			fdtaddr = raddr + ALIGN_SECTOR(hdr->ramdisk_size, hdr->page_size);
+			end = fdtaddr + hdr->second_size;
+		}
+#endif /*CONFIG_OF_LIBFDT*/
+		if (kaddr != hdr->kernel_addr) {
+			/*check overlap*/
+			if (((hdr->kernel_addr >= addr) &&
+					(hdr->kernel_addr <= end)) ||
+				((addr >= hdr->kernel_addr) &&
+					(addr <= hdr->kernel_addr + hdr->kernel_size))) {
+				printf("Fail: booti address overlap with kernel address\n");
+				return 1;
+			}
+			memmove((void *) hdr->kernel_addr,
+				(void *)kaddr, hdr->kernel_size);
+		}
+		if (raddr != hdr->ramdisk_addr) {
+			/*check overlap*/
+			if (((hdr->ramdisk_addr >= addr) &&
+					(hdr->ramdisk_addr <= end)) ||
+				((addr >= hdr->ramdisk_addr) &&
+					(addr <= hdr->ramdisk_addr + hdr->ramdisk_size))) {
+				printf("Fail: booti address overlap with ramdisk address\n");
+				return 1;
+			}
+			memmove((void *) hdr->ramdisk_addr,
+				(void *)raddr, hdr->ramdisk_size);
+		}
+
+#ifdef CONFIG_OF_LIBFDT
+		if (hdr->second_size && fdtaddr != hdr->second_addr) {
+			/*check overlap*/
+			if (((hdr->second_addr >= addr) &&
+					(hdr->second_addr <= end)) ||
+				((addr >= hdr->second_addr) &&
+					(addr <= hdr->second_addr + hdr->second_size))) {
+				printf("Fail: booti address overlap with FDT address\n");
+				return 1;
+			}
+			memmove((void *) hdr->second_addr,
+				(void *)fdtaddr, hdr->second_size);
+		}
+#endif /*CONFIG_OF_LIBFDT*/
+	}
+
+	printf("kernel   @ %08x (%d)\n", hdr->kernel_addr, hdr->kernel_size);
+	printf("ramdisk  @ %08x (%d)\n", hdr->ramdisk_addr, hdr->ramdisk_size);
+#ifdef CONFIG_OF_LIBFDT
+	if (hdr->second_size)
+		printf("fdt      @ %08x (%d)\n", hdr->second_addr, hdr->second_size);
+#endif /*CONFIG_OF_LIBFDT*/
+
+#ifdef CONFIG_SECURE_BOOT
+#define IVT_SIZE 0x20
+#define CSF_PAD_SIZE 0x2000
+	extern uint32_t authenticate_image(uint32_t ddr_start,
+					   uint32_t image_size);
+
+	image_size = hdr->ramdisk_addr + hdr->ramdisk_size - hdr->kernel_addr -
+		IVT_SIZE - CSF_PAD_SIZE;
+
+	if (authenticate_image(hdr->kernel_addr, image_size)) {
+		printf("Authenticate OK\n");
+	} else {
+		printf("Authenticate image Fail, Please check\n\n");
+		return 1;
+	}
+#endif /*CONFIG_SECURE_BOOT*/
+
+#ifdef CONFIG_CMDLINE_TAG
+	char *commandline = getenv("bootargs");
+
+	/* If no bootargs env, just use hdr command line */
+	if (!commandline) {
+		commandline = (char *)hdr->cmdline;
+#ifdef CONFIG_SERIAL_TAG
+		char appended_cmd_line[FASTBOOT_BOOT_ARGS_SIZE];
+		struct tag_serialnr serialnr;
+		get_board_serial(&serialnr);
+		if (strlen((char *)hdr->cmdline) +
+			strlen("androidboot.serialno") + 17 < FASTBOOT_BOOT_ARGS_SIZE) {
+			sprintf(appended_cmd_line,
+							"%s androidboot.serialno=%08x%08x",
+							(char *)hdr->cmdline,
+							serialnr.high,
+							serialnr.low);
+			commandline = appended_cmd_line;
+		} else {
+			printf("Cannot append androidboot.serialno\n");
+		}
+
+		setenv("bootargs", commandline);
+#endif
+	}
+
+	/* XXX: in production, you should always use boot.img 's cmdline !!! */
+	printf("kernel cmdline:\n");
+	printf("\tuse boot.img ");
+	printf("command line:\n\t%s\n", commandline);
+#endif /*CONFIG_CMDLINE_TAG*/
+
+	memset(&images, 0, sizeof(images));
+
+	/*Setup lmb for memory reserve*/
+	boot_start_lmb(&images);
+
+	images.ep = hdr->kernel_addr;
+	images.rd_start = hdr->ramdisk_addr;
+	images.rd_end = hdr->ramdisk_addr + hdr->ramdisk_size;
+
+	/*Reserve memory for kernel image*/
+	lmb_reserve(&images.lmb, images.ep, hdr->kernel_size);
+
+#ifdef CONFIG_OF_LIBFDT
+	/*use secondary fields for fdt, second_size= fdt size, second_addr= fdt addr*/
+	images.ft_addr = (char *)(hdr->second_addr);
+	images.ft_len = (ulong)(hdr->second_size);
+	set_working_fdt_addr(images.ft_addr);
+#endif /*CONFIG_OF_LIBFDT*/
+
+	arch_preboot_os();
+
+	do_bootm_linux(0, 0, NULL, &images);
+
+	puts("booti: Control returned to monitor - resetting...\n");
+	do_reset(cmdtp, flag, argc, argv);
+	return 1;
+
+fail:
+#ifdef CONFIG_FASTBOOT
+	return do_fastboot(NULL, 0, 0, NULL);
+#else /*! CONFIG_FASTBOOT*/
+	return -1;
+#endif /*! CONFIG_FASTBOOT*/
 }
+
+U_BOOT_CMD(
+	booti,	3,	1,	do_booti,
+	"booti   - boot android bootimg from memory\n",
+	"[<addr> | mmc0 | mmc1 | mmc2 | mmcX] [<partition>]\n    "
+	"- boot application image stored in memory or mmc\n"
+	"\t'addr' should be the address of boot image "
+	"which is zImage+ramdisk.img\n"
+	"\t'mmcX' is the mmc device you store your boot.img, "
+	"which will read the boot.img from 1M offset('/boot' partition)\n"
+	"\t 'partition' (optional) is the partition id of your device, "
+	"if no partition give, will going to 'boot' partition\n"
+);
+#endif	/* CONFIG_CMD_BOOTI */
 
 #endif	/* CONFIG_FASTBOOT */

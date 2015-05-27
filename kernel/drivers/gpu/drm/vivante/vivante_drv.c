@@ -58,20 +58,18 @@
 static char platformdevicename[] = "Vivante GCCore";
 static struct platform_device *pplatformdev;
 
-static struct drm_driver driver = {
-	.driver_features = DRIVER_USE_MTRR,
-	.reclaim_buffers = drm_core_reclaim_buffers,
-	.fops = {
-		 .owner = THIS_MODULE,
-		 .open = drm_open,
-		 .release = drm_release,
-		 .unlocked_ioctl = drm_ioctl,
-		 .mmap = drm_mmap,
-		 .poll = drm_poll,
-		 .fasync = drm_fasync,
-		 .llseek = noop_llseek,
-	},
+static const struct file_operations viv_driver_fops = {
+	.owner = THIS_MODULE,
+	.open = drm_open,
+	.release = drm_release,
+	.unlocked_ioctl = drm_ioctl,
+	.mmap = drm_mmap,
+	.poll = drm_poll,
+	.llseek = noop_llseek,
+};
 
+static struct drm_driver driver = {
+	.fops = &viv_driver_fops,
 	.name = DRIVER_NAME,
 	.desc = DRIVER_DESC,
 	.date = DRIVER_DATE,
@@ -97,7 +95,8 @@ static int __init vivante_init(void)
 static void __exit vivante_exit(void)
 {
 	if (pplatformdev) {
-		drm_platform_exit(&driver, pplatformdev);
+		/* The drvdata is set in drm_get_platform_dev() */
+		drm_put_dev(platform_get_drvdata(pplatformdev));
 		platform_device_unregister(pplatformdev);
 		pplatformdev = NULL;
 	}

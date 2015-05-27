@@ -23,9 +23,7 @@
  *     GNU General Public License for more details.
  *
  *     You should have received a copy of the GNU General Public License
- *     along with this program; if not, write to the Free Software
- *     Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- *     MA 02111-1307 USA
+ *     along with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  ********************************************************************/
 
@@ -42,6 +40,7 @@
 #include <linux/kmod.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
+#include <linux/export.h>
 
 #include <asm/ioctls.h>
 #include <asm/uaccess.h>
@@ -262,7 +261,7 @@ static void irda_task_timer_expired(void *data)
 
 	IRDA_DEBUG(2, "%s()\n", __func__);
 
-	task = (struct irda_task *) data;
+	task = data;
 
 	irda_task_kick(task);
 }

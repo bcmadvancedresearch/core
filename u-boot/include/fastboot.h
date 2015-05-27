@@ -3,7 +3,7 @@
  * Windriver, <www.windriver.com>
  * Tom Rix <Tom.Rix@windriver.com>
  *
- * Copyright (C) 2010-2012 Freescale Semiconductor, Inc.
+ * Copyright (C) 2010-2013 Freescale Semiconductor, Inc.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -68,13 +68,10 @@
    the board specific support.
 
    To use this interface, define CONFIG_FASTBOOT in your board config file.
-   An example is include/configs/omap3430labrador.h
+   An example is include/configs/mx6slevkandroid.h
    ...
    #define CONFIG_FASTBOOT	        1    / * Using fastboot interface * /
    ...
-
-   An example of the board specific spupport for omap3 is found at
-   cpu/omap3/fastboot.c
 
 */
 
@@ -85,12 +82,57 @@
 
 #define FASTBOOT_VERSION "0.5"
 
+/* Max size of responses from us to host */
+#define FASTBOOT_RESPONSE_SIZE 65
+
 /* The fastboot client uses a value of 2048 for the
    page size of it boot.img file format.
    Reset this in your board config file as needed. */
 #ifndef CFG_FASTBOOT_MKBOOTIMAGE_PAGE_SIZE
 #define CFG_FASTBOOT_MKBOOTIMAGE_PAGE_SIZE 2048
 #endif
+
+/* Lower byte shows if the read/write/erase operation in
+   repeated.  The base address is incremented.
+   Either 0 or 1 is ok for a default */
+
+#define FASTBOOT_PTENTRY_FLAGS_REPEAT(n)              (n & 0x0f)
+#define FASTBOOT_PTENTRY_FLAGS_REPEAT_MASK            0x0000000F
+
+/* Writes happen a block at a time.
+   If the write fails, go to next block
+   NEXT_GOOD_BLOCK and CONTIGOUS_BLOCK can not both be set */
+#define FASTBOOT_PTENTRY_FLAGS_WRITE_NEXT_GOOD_BLOCK  0x00000010
+
+/* Find a contiguous block big enough for a the whole file
+   NEXT_GOOD_BLOCK and CONTIGOUS_BLOCK can not both be set */
+#define FASTBOOT_PTENTRY_FLAGS_WRITE_CONTIGUOUS_BLOCK 0x00000020
+
+/* Write the file with write.i */
+#define FASTBOOT_PTENTRY_FLAGS_WRITE_I                0x00000100
+
+/* Write the file with write.trimffs */
+#define FASTBOOT_PTENTRY_FLAGS_WRITE_TRIMFFS          0x00000200
+
+/* Write the file as a series of variable/value pairs
+   using the setenv and saveenv commands */
+#define FASTBOOT_PTENTRY_FLAGS_WRITE_ENV              0x00000400
+
+/* Status values */
+#define FASTBOOT_OK			0
+#define FASTBOOT_ERROR			-1
+#define FASTBOOT_DISCONNECT		1
+#define FASTBOOT_INACTIVE		2
+
+/* Android bootimage file format */
+#define FASTBOOT_BOOT_MAGIC "ANDROID!"
+#define FASTBOOT_BOOT_MAGIC_SIZE 8
+#define FASTBOOT_BOOT_NAME_SIZE 16
+#define FASTBOOT_BOOT_ARGS_SIZE 512
+
+#define FASTBOOT_MMC_BOOT_PARTITION_ID  1
+#define FASTBOOT_MMC_USER_PARTITION_ID  0
+#define FASTBOOT_MMC_NONE_PARTITION_ID -1
 
 enum {
     DEV_SATA,
@@ -156,9 +198,6 @@ struct cmd_fastboot_interface {
 
 };
 
-/* Android-style flash naming */
-typedef struct fastboot_ptentry fastboot_ptentry;
-
 /* flash partitions are defined in terms of blocks
 ** (flash erase units)
 */
@@ -181,52 +220,9 @@ struct fastboot_device_info {
 	unsigned char dev_id;
 };
 
-/* Lower byte shows if the read/write/erase operation in
-   repeated.  The base address is incremented.
-   Either 0 or 1 is ok for a default */
-
-#define FASTBOOT_PTENTRY_FLAGS_REPEAT(n)              (n & 0x0f)
-#define FASTBOOT_PTENTRY_FLAGS_REPEAT_MASK            0x0000000F
-
-/* Writes happen a block at a time.
-   If the write fails, go to next block
-   NEXT_GOOD_BLOCK and CONTIGOUS_BLOCK can not both be set */
-#define FASTBOOT_PTENTRY_FLAGS_WRITE_NEXT_GOOD_BLOCK  0x00000010
-
-/* Find a contiguous block big enough for a the whole file
-   NEXT_GOOD_BLOCK and CONTIGOUS_BLOCK can not both be set */
-#define FASTBOOT_PTENTRY_FLAGS_WRITE_CONTIGUOUS_BLOCK 0x00000020
-
-/* Sets the ECC to hardware before writing
-   HW and SW ECC should not both be set. */
-#define FASTBOOT_PTENTRY_FLAGS_WRITE_HW_ECC           0x00000040
-
-/* Sets the ECC to software before writing
-   HW and SW ECC should not both be set. */
-#define FASTBOOT_PTENTRY_FLAGS_WRITE_SW_ECC           0x00000080
-
-/* Write the file with write.i */
-#define FASTBOOT_PTENTRY_FLAGS_WRITE_I                0x00000100
-
-/* Write the file with write.yaffs */
-#define FASTBOOT_PTENTRY_FLAGS_WRITE_YAFFS            0x00000200
-
-/* Write the file as a series of variable/value pairs
-   using the setenv and saveenv commands */
-#define FASTBOOT_PTENTRY_FLAGS_WRITE_ENV              0x00000400
-
-/* Status values */
-#define FASTBOOT_OK			0
-#define FASTBOOT_ERROR			-1
-#define FASTBOOT_DISCONNECT		1
-#define FASTBOOT_INACTIVE		2
-
-/* Android bootimage file format */
-#define FASTBOOT_BOOT_MAGIC "ANDROID!"
-#define FASTBOOT_BOOT_MAGIC_SIZE 8
-#define FASTBOOT_BOOT_NAME_SIZE 16
-#define FASTBOOT_BOOT_ARGS_SIZE 512
-
+/* Boot img hdr structure comes from the Android project
+  * See it in: system/core/mkbootimg/bootimg.h
+  */
 struct fastboot_boot_img_hdr {
 	unsigned char magic[FASTBOOT_BOOT_MAGIC_SIZE];
 
@@ -251,15 +247,18 @@ struct fastboot_boot_img_hdr {
 };
 
 #ifdef CONFIG_FASTBOOT
-/* A board specific test if u-boot should go into the fastboot command
-   ahead of the bootcmd
-   Returns 0 to continue with normal u-boot flow
-   Returns 1 to execute fastboot */
-int fastboot_preboot(void);
+
+extern struct fastboot_device_info fastboot_devinfo;
+
+/* Prepare the fastboot environments,
+  * should be executed before "fastboot" cmd
+  */
+void fastboot_setup(void);
 
 /* Initizes the board specific fastboot
-   Returns 0 on success
-   Returns 1 on failure */
+  * Returns 0 on success
+  * Returns 1 on failure
+  */
 int fastboot_init(struct cmd_fastboot_interface *interface);
 
 /* Cleans up the board specific fastboot */
@@ -275,19 +274,21 @@ void fastboot_shutdown(void);
 int fastboot_poll(void);
 
 /* Is this high speed (2.0) or full speed (1.1) ?
-   Returns 0 on full speed
-   Returns 1 on high speed */
+  * Returns 0 on full speed
+  * Returns 1 on high speed
+  */
 int fastboot_is_highspeed(void);
 
 /* Return the size of the fifo */
 int fastboot_fifo_size(void);
 
 /* Send a status reply to the client app
-   buffer does not have to be null terminated.
-   buffer_size must be not be larger than what is returned by
-   fastboot_fifo_size
-   Returns 0 on success
-   Returns 1 on failure */
+  * buffer does not have to be null terminated.
+  * buffer_size must be not be larger than what is returned by
+  * fastboot_fifo_size
+  * Returns 0 on success
+  * Returns 1 on failure
+  */
 int fastboot_tx_status(const char *buffer, unsigned int buffer_size);
 
 /*
@@ -300,53 +301,52 @@ int fastboot_tx_status(const char *buffer, unsigned int buffer_size);
 int fastboot_tx(unsigned char *buffer, unsigned int buffer_size);
 
 /* A board specific variable handler.
-   The size of the buffers is governed by the fastboot spec.
-   rx_buffer is at most 57 bytes
-   tx_buffer is at most 60 bytes
-   Returns 0 on success
-   Returns 1 on failure */
+  * The size of the buffers is governed by the fastboot spec.
+  * rx_buffer is at most 57 bytes
+  * tx_buffer is at most 60 bytes
+  * Returns 0 on success
+  * Returns 1 on failure
+  */
 int fastboot_getvar(const char *rx_buffer, char *tx_buffer);
 
 /* The Android-style flash handling */
 
 /* tools to populate and query the partition table */
-void fastboot_flash_add_ptn(fastboot_ptentry *ptn);
-fastboot_ptentry *fastboot_flash_find_ptn(const char *name);
-fastboot_ptentry *fastboot_flash_get_ptn(unsigned n);
+void fastboot_flash_add_ptn(struct fastboot_ptentry *ptn);
+struct fastboot_ptentry *fastboot_flash_find_ptn(const char *name);
+struct fastboot_ptentry *fastboot_flash_get_ptn(unsigned n);
 unsigned int fastboot_flash_get_ptn_count(void);
 void fastboot_flash_dump_ptn(void);
 
-int fastboot_flash_init(void);
-int fastboot_flash_erase(fastboot_ptentry *ptn);
-int fastboot_flash_read_ext(fastboot_ptentry *ptn,
-				   unsigned extra_per_page, unsigned offset,
-				   void *data, unsigned bytes);
-#define fastboot_flash_read(ptn, offset, data, bytes) \
-  flash_read_ext(ptn, 0, offset, data, bytes)
-int fastboot_flash_write(fastboot_ptentry *ptn, unsigned extra_per_page,
-				const void *data, unsigned bytes);
 
 /* Check the board special boot mode reboot to fastboot mode. */
 int fastboot_check_and_clean_flag(void);
-int do_fastboot(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[]);
-void check_fastboot_mode(void);
 
+/*fastboot command handling function*/
+int do_fastboot(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[]);
 
-void fastboot_quick(u8 debug);
-int  fastboot_write_storage(u8 *partition_name, u32 write_len);
-void fastboot_dump_memory(u32 *ptr, u32 lEN);
-void fastboot_get_ep_num(u8 *in, u8 *out);
-extern u8 fastboot_debug_level;
-#define DBG_ALWS(x...)    printf(x)
-#define DBG_ERR(x...)     printf(x)
-#define DBG_DEBUG(x...)   if (fastboot_debug_level >= 1) printf(x)
-#define DBG_INFO(x...)    if (fastboot_debug_level >= 2) printf(x)
+/*check if fastboot mode is requested by user*/
+void check_fastboot(void);
 
+/*Setup board-relative fastboot environment */
+void board_fastboot_setup(void);
 
-#else
+#ifdef CONFIG_FASTBOOT_STORAGE_NAND
+/*Save parameters for NAND storage partitions */
+void save_parts_values(struct fastboot_ptentry *ptn,
+	unsigned int offset, unsigned int size);
+
+/* Checks parameters for NAND storage partitions
+  * Return 1 if the parameter is not set
+  * Return 0 if the parameter has been set
+  */
+int check_parts_values(struct fastboot_ptentry *ptn);
+#endif /*CONFIG_FASTBOOT_STORAGE_NAND*/
+
+#else /*! CONFIG_FASTBOOT*/
 
 /* Stubs for when CONFIG_FASTBOOT is not defined */
-#define fastboot_preboot() 0
+#define fastboot_setup() 0
 #define fastboot_init(a) 1
 #define fastboot_shutdown()
 #define fastboot_poll() 1
@@ -361,13 +361,7 @@ extern u8 fastboot_debug_level;
 #define fastboot_flash_get_ptn(a) NULL
 #define fastboot_flash_get_ptn_count() 0
 #define fastboot_flash_dump_ptn()
-#define fastboot_flash_init()
-#define fastboot_flash_erase(a) 1
-#define fastboot_flash_read_ext(a, b, c, d, e) 0
-#define fastboot_flash_read(a, b, c, d, e) 0
-#define fastboot_flash_write(a, b, c, d) 0
 #define do_fastboot(a, b, c, d) 0
-
 
 #define fastboot_quick(a) 0
 #define fastboot_get_ep_num(a, b)  0
@@ -378,5 +372,5 @@ extern u8 fastboot_debug_level;
 #define DBG_INFO(x...)
 
 
-#endif /* CONFIG_FASTBOOT */
+#endif /*! CONFIG_FASTBOOT*/
 #endif /* FASTBOOT_H */

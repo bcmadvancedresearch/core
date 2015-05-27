@@ -2,23 +2,7 @@
  * (C) Copyright 2005-2009
  * Jens Scharsig @ BuS Elektronik GmbH & Co. KG, <esw@bus-elektronik.de>
  *
- * See file CREDITS for list of people who contributed to this
- * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 #include <common.h>
@@ -31,22 +15,27 @@ vu_long  *vcxk_bws_long = ((vu_long *) (CONFIG_SYS_VCXK_BASE));
 
 #ifdef CONFIG_AT91RM9200
 	#include <asm/arch/hardware.h>
+	#include <asm/arch/at91_pio.h>
+
 	#ifndef VCBITMASK
 		#define VCBITMASK(bitno)	(0x0001 << (bitno % 16))
 	#endif
-	#define VCXK_INIT_PIN(PORT, PIN, DDR, I0O1) \
-		((AT91PS_PIO) PORT)->PIO_PER = PIN; \
-		((AT91PS_PIO) PORT)->DDR = PIN; \
-		((AT91PS_PIO) PORT)->PIO_MDDR = PIN; \
-		if (!I0O1) ((AT91PS_PIO) PORT)->PIO_PPUER = PIN;
+at91_pio_t *pio = (at91_pio_t *) AT91_PIO_BASE;
+#define VCXK_INIT_PIN(PORT, PIN, DDR, I0O1) \
+	do { \
+		writel(PIN, &pio->PORT.per); \
+		writel(PIN, &pio->PORT.DDR); \
+		writel(PIN, &pio->PORT.mddr); \
+		if (!I0O1) \
+			writel(PIN, &pio->PORT.puer); \
+	} while (0);
 
-	#define VCXK_SET_PIN(PORT, PIN)	((AT91PS_PIO) PORT)->PIO_SODR  = PIN;
-	#define VCXK_CLR_PIN(PORT, PIN)	((AT91PS_PIO) PORT)->PIO_CODR  = PIN;
+#define VCXK_SET_PIN(PORT, PIN)	writel(PIN, &pio->PORT.sodr);
+#define VCXK_CLR_PIN(PORT, PIN)	writel(PIN, &pio->PORT.codr);
 
-	#define VCXK_ACKNOWLEDGE	\
-		(!(((AT91PS_PIO) CONFIG_SYS_VCXK_ACKNOWLEDGE_PORT)->\
-			PIO_PDSR & CONFIG_SYS_VCXK_ACKNOWLEDGE_PIN))
-
+#define VCXK_ACKNOWLEDGE	\
+	(!(readl(&pio->CONFIG_SYS_VCXK_ACKNOWLEDGE_PORT.pdsr) & \
+			CONFIG_SYS_VCXK_ACKNOWLEDGE_PIN))
 #elif defined(CONFIG_MCF52x2)
 	#include <asm/m5282.h>
 	#ifndef VCBITMASK
@@ -133,7 +122,7 @@ int vcxk_init(unsigned long width, unsigned long height)
 #ifdef CONFIG_SYS_VCXK_DOUBLEBUFFERED
 	double_bws_word  = (u_short *)double_bws;
 	double_bws_long  = (u_long *)double_bws;
-	debug("%lx %lx %lx \n", double_bws, double_bws_word, double_bws_long);
+	debug("%px %px %px\n", double_bws, double_bws_word, double_bws_long);
 #endif
 	display_width  = width;
 	display_height = height;
@@ -144,7 +133,7 @@ int vcxk_init(unsigned long width, unsigned long height)
 #else
 	#error CONFIG_SYS_VCXK_DEFAULT_LINEALIGN is invalid
 #endif
-	debug("linesize ((%d + 15) / 8 & ~0x1) = %d\n",
+	debug("linesize ((%ld + 15) / 8 & ~0x1) = %ld\n",
 		display_width, display_bwidth);
 
 #ifdef CONFIG_SYS_VCXK_AUTODETECT
@@ -373,7 +362,6 @@ int vcxk_display_bitmap(ulong addr, int x, int y)
 	unsigned long width;
 	unsigned long height;
 	unsigned long bpp;
-	unsigned long compression;
 
 	unsigned long lw;
 
@@ -384,7 +372,6 @@ int vcxk_display_bitmap(ulong addr, int x, int y)
 	bmp = (bmp_image_t *) addr;
 	if ((bmp->header.signature[0] == 'B') &&
 	    (bmp->header.signature[1] == 'M')) {
-		compression  = le32_to_cpu(bmp->header.compression);
 		width        = le32_to_cpu(bmp->header.width);
 		height       = le32_to_cpu(bmp->header.height);
 		bpp          = le16_to_cpu(bmp->header.bit_count);
