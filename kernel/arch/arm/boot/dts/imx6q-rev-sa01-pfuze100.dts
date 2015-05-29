@@ -1,0 +1,29 @@
+/dts-v1/;
+
+#include "imx6q.dtsi"
+#include "imx6qdl-smarc.dtsi"
+#include "imx6qdl-rev-sa01-pfuze100.dtsi"
+
+/ {
+	model = "Freescale i.MX6 Quad SMARC REV-SA01 Device Board";
+	compatible = "fsl,imx6q-smarc", "fsl,imx6q";
+};
+
+&ldb {
+	lvds-channel@0 {
+		crtc = "ipu2-di0";
+	};
+
+	lvds-channel@1 {
+		crtc = "ipu2-di1";
+	};
+};
+
+&mxcfb1 {
+	status = "okay";
+};
+
+&sata {
+	status = "okay";
+};
+
