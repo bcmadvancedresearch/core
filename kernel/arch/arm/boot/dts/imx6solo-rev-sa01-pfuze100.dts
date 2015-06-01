@@ -1,6 +1,6 @@
 /dts-v1/;
 
-#include "imx6q.dtsi"
+#include "imx6dl.dtsi"
 #include "imx6qdl-smarc.dtsi"
 #include "imx6qdl-rev-sa01-pfuze100.dtsi"
 
