@@ -4,12 +4,16 @@
 #include <mach/iomux-mx6q.h>
 #include <mach/iomux-mx6dl.h>
 
-#define SMARC_SD2_CD    	IMX_GPIO_NR(3, 14)  // GPIO3[14] EIM_DA14
-#define SMARC_SD2_WP    	IMX_GPIO_NR(3, 13)  // GPIO3[13] EIM_DA13
+#define SMARC_SD2_CD    	IMX_GPIO_NR(3, 14)	// GPIO3[14] EIM_DA14
+#define SMARC_SD2_WP    	IMX_GPIO_NR(3, 13)	// GPIO3[13] EIM_DA13
 #define SMARC_USB_OTG_PWR	IMX_GPIO_NR(3, 22)	// GPIO3[22] EIM_D22
 
 #define	SMARC_PCIE_WAKE		IMX_GPIO_NR(3, 11)	// PCIE WAKE
 #define	SMARC_PCIE_RESET	IMX_GPIO_NR(4, 5)	// PCIE RESET
+
+#ifdef	CONFIG_SMARC_PMIC_PFUZE
+#define	SMARC_PFUZE_INT		IMX_GPIO_NR(7, 13)	// PMIC INT
+#endif
 
 static iomux_v3_cfg_t mx6q_smarc_basic_pads[] = {
 	/* -- AUDMUX(I2S) -- */
@@ -82,15 +86,19 @@ static iomux_v3_cfg_t mx6q_smarc_basic_pads[] = {
 	MX6Q_PAD_ENET_RX_ER__ANATOP_USBOTG_ID,
 
 	/* -- USBs OC pin -- */
-	MX6Q_PAD_EIM_D21__GPIO_3_21,	// OTG_OC#
-	MX6Q_PAD_EIM_D30__GPIO_3_30,	// H1_OC#
+	MX6Q_PAD_EIM_D21__GPIO_3_21,		// OTG_OC#
+	MX6Q_PAD_EIM_D30__GPIO_3_30,		// H1_OC#
 
 	/* -- PCI-E -- */
-	MX6Q_PAD_EIM_DA10__GPIO_3_10,	// PCIE WAKE
-	MX6Q_PAD_GPIO_19__GPIO_4_5,    // RESET
+	MX6Q_PAD_EIM_DA10__GPIO_3_10,		// PCIE WAKE
+	MX6Q_PAD_GPIO_19__GPIO_4_5,		// RESET
 
 	/* -- Watch DOG -- */
 	MX6Q_PAD_GPIO_1__WDOG2_WDOG_B,
+
+	#ifdef	CONFIG_SMARC_PMIC_PFUZE
+	MX6Q_PAD_GPIO_18__GPIO_7_13,		// PMIC INT
+	#endif
 };
 
 static iomux_v3_cfg_t mx6solo_smarc_basic_pads[] = {
@@ -166,14 +174,18 @@ static iomux_v3_cfg_t mx6solo_smarc_basic_pads[] = {
 	MX6DL_PAD_ENET_RX_ER__ANATOP_USBOTG_ID,
 
 	/* -- USBs OC pin -- */
-	MX6DL_PAD_EIM_D21__GPIO_3_21,    // OTG_OC#
-	MX6DL_PAD_EIM_D30__GPIO_3_30,    // H1_OC#
+	MX6DL_PAD_EIM_D21__GPIO_3_21,		// OTG_OC#
+	MX6DL_PAD_EIM_D30__GPIO_3_30,		// H1_OC#
 
 	/* -- PCI-E -- */
-	MX6DL_PAD_EIM_DA10__GPIO_3_10,	// PCIE WAKE
-	MX6DL_PAD_GPIO_19__GPIO_4_5,	// PCIE RESETa
+	MX6DL_PAD_EIM_DA10__GPIO_3_10,		// PCIE WAKE
+	MX6DL_PAD_GPIO_19__GPIO_4_5,		// PCIE RESETa
 
 	/* -- Watch DOG -- */
-	MX6DL_PAD_GPIO_1__WDOG2_WDOG_B
+	MX6DL_PAD_GPIO_1__WDOG2_WDOG_B,
+
+	#ifdef  CONFIG_SMARC_PMIC_PFUZE
+	MX6DL_PAD_GPIO_18__GPIO_7_13,		// PMIC INT
+	#endif
 };
 #endif

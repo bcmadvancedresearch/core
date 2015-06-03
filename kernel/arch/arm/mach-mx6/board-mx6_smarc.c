@@ -104,6 +104,9 @@ void smarc_board_init(void);
 void reserve(void);
 void set_console_timer(void);
 void fixup_board(struct machine_desc *, struct tag *, char **, struct meminfo *);
+#ifdef	CONFIG_SMARC_PMIC_PFUZE
+int mx6q_smarc_init_pfuze100(u32);
+#endif
 
 static const struct esdhc_platform_data mx6q_smarc_sd4_data __initconst = {
 	.always_present = 1,
@@ -399,10 +402,6 @@ static void mx6_snvs_poweroff(void)
  */
 static void __init mx6_smarc_board_init(void)
 {
-	int rate = 0;
-	struct clk *clko2 = NULL;
-	struct clk *new_parent = NULL;
-
 	if (cpu_is_mx6q()) {
 		mxc_iomux_v3_setup_multiple_pads(mx6q_smarc_basic_pads, ARRAY_SIZE(mx6q_smarc_basic_pads));
 	} else {
@@ -411,6 +410,12 @@ static void __init mx6_smarc_board_init(void)
 
 	#ifdef CONFIG_ANDROID_RAM_CONSOLE
 	imx6x_add_ram_console();
+	#endif
+
+	#ifdef	CONFIG_SMARC_PMIC_PFUZE
+	gpio_request(SMARC_PFUZE_INT, "pFUZE-int");
+	gpio_direction_input(SMARC_PFUZE_INT);
+	mx6q_smarc_init_pfuze100(SMARC_PFUZE_INT);
 	#endif
 
 	imx6q_add_vdoa();
@@ -436,7 +441,6 @@ static void __init mx6_smarc_board_init(void)
 
 	/* -- Initize eMMC -- */
 	imx6q_add_sdhci_usdhc_imx(3, &mx6q_smarc_sd4_data);
-	//platform_device_register(&smarc_vmmc_reg_devices);
 
 	imx6q_smarc_init_usb();
 

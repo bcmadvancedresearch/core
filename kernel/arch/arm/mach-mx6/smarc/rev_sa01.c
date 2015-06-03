@@ -202,6 +202,7 @@ void set_smarc_hdmi(void)
 	imx6q_add_hdmi_soc_dai();
 }
 
+#ifdef	CONFIG_SMARC_DISPLAY_LVDS
 void set_smarc_lvds(void)
 {
 	if(cpu_is_mx6q()) {
@@ -217,9 +218,13 @@ void set_smarc_lvds(void)
 	gpio_request(SMARC_LCD_VDD_EN, "lcd-vdd-en");
 	gpio_direction_output(SMARC_LCD_VDD_EN, 1);
 	gpio_set_value(SMARC_LCD_VDD_EN, 1);
+
+	imx6q_add_ldb(&ldb_data);
 }
+#endif
 
 static struct ipuv3_fb_platform_data smarc_fb_data[] = {
+	#ifdef	CONFIG_SMARC_DISPLAY_HDMI
 	{
 	.disp_dev = "hdmi",
 	.interface_pix_fmt = IPU_PIX_FMT_RGB24,
@@ -228,16 +233,17 @@ static struct ipuv3_fb_platform_data smarc_fb_data[] = {
 	.int_clk = false,
 	.late_init = false,
 	},
-	/*
+	#endif
+	#ifdef	CONFIG_SMARC_DISPLAY_VGA
 	{
 	.disp_dev = "lcd",
 	.interface_pix_fmt = IPU_PIX_FMT_RGB24,
 	.mode_str = "LCD_WVGA",
 	.default_bpp = 32,
-	.int_clk = true,
+	.int_clk = false,
 	},
-	*/
-	/*
+	#endif
+	#ifdef	CONFIG_SMARC_DISPLAY_LVDS
 	{
 	.disp_dev = "ldb",
 	.interface_pix_fmt = IPU_PIX_FMT_RGB666,
@@ -246,38 +252,22 @@ static struct ipuv3_fb_platform_data smarc_fb_data[] = {
 	.int_clk = false,
 	.late_init = false,
 	},
-	*/
-	/*
-	{
-	.disp_dev = "lcd",
-	.interface_pix_fmt = IPU_PIX_FMT_BGR24,
-	.mode_str = "LCD_XGA",
-	.default_bpp = 16,
-	.int_clk = false,
-	},
-	*/
-	/*
-	{
-	.disp_dev = "hdmi",
-	.interface_pix_fmt = IPU_PIX_FMT_RGB24,
-	.mode_str = "1920x1080M@60",
-	.default_bpp = 32,
-	.int_clk = false,
-	.late_init = false,
-	},
-	*/
+	#endif
 };
 
+#ifdef	CONFIG_SMARC_DISPLAY_VGA
 static struct fsl_mxc_lcd_platform_data lcdif_data = {
 	.ipu_id = 0,
 	.disp_id = 0,
 	.default_ifmt = IPU_PIX_FMT_BGR24,
 };
+#endif
 
 static struct viv_gpu_platform_data imx6q_gpu_pdata __initdata = {
 	.reserved_mem_size = SZ_128M + SZ_64M - SZ_16M,
 };
 
+#ifdef	CONFIG_SMARC_DISPLAY_LVDS
 static struct fsl_mxc_ldb_platform_data ldb_data = {
 	.ipu_id			= 0,
 	.disp_id		= 1,
@@ -286,6 +276,7 @@ static struct fsl_mxc_ldb_platform_data ldb_data = {
 	.sec_ipu_id		= 0,
 	.sec_disp_id	= 0,
 };
+#endif
 
 static struct imx_ipuv3_platform_data ipu_data[] = {
 {
@@ -478,14 +469,35 @@ void smarc_can_init(void)
 	imx6q_add_flexcan1(&mx6_smarc_flexcan1_pdata);
 }
 
+#ifdef	CONFIG_SMARC_DISPLAY_VGA
+static void smarc_lcd_init(void)
+{
+	if (cpu_is_mx6q()) {
+		mxc_iomux_v3_setup_multiple_pads(mx6q_smarc_ttl_pad, ARRAY_SIZE(mx6q_smarc_ttl_pad));
+	} else {
+		mxc_iomux_v3_setup_multiple_pads(mx6solo_smarc_ttl_pad, ARRAY_SIZE(mx6solo_smarc_ttl_pad));
+	}
+	imx6q_add_lcdif(&lcdif_data);
+}
+#endif
+
 void __init smarc_board_init(void)
 {
 	mx6q_init_audio();
 	smarc_fb_init();
+
+	#ifdef	CONFIG_SMARC_DISPLAY_LVDS
 	set_smarc_lvds();
-	imx6q_add_lcdif(&lcdif_data);
-	//imx6q_add_ldb(&ldb_data);
+	#endif
+
+	#ifdef	CONFIG_SMARC_DISPLAY_VGA
+	smarc_lcd_init();
+	#endif
+
+	#ifdef	CONFIG_SMARC_DISPLAY_HDMI
 	set_smarc_hdmi();
+	#endif
+
 	imx6q_add_vpu();
 	imx_add_viv_gpu(&imx6_gpu_data, &imx6q_gpu_pdata);
 	imx6q_add_v4l2_output(0);

@@ -20,4 +20,40 @@ config SMARC_MFG
 	  SMARC for MFG tools
 
 endchoice
+
+choice SMARC_DISPLAY
+	prompt "SMARC Display Configure"
+	default SMARC_DISPLAY_HDMI
+
+config SMARC_DISPLAY_HDMI
+	bool "SMARC Display HDMI"
+	help
+	  SMARC Display is HDMI
+
+config SMARC_DISPLAY_VGA
+	bool "SMARC Display VGA"
+	help
+	  SMARC Display is VGA
+
+config SMARC_DISPLAY_LVDS
+	bool "SMARC Display LVDS"
+	help
+	  SMARC Display is LVDS
+endchoice
+
+choice	SMARC_PMIC
+	prompt "SMARC PMIC Configure"
+	default	SMARC_PMIC_PFUZE
+
+config	SMARC_PMIC_PFUZE
+	bool "SMARC PMIC pfuze-100"
+	help
+	  SMARC PMIC is pfuze-100
+
+config SMARC_PMIC_WM8326
+	bool "SMARC PMIC wm8326"
+	help
+	  SMARC PMIC is wm8326
+endchoice
+
 endif

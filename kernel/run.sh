@@ -10,11 +10,6 @@ if [ $1 == "distclean" ]; then
 	exit;
 fi
 
-if [ $1 == "clean" ]; then
-	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE clean
-	exit;
-fi
-
 if [ $1 == "mfg" ]; then
 	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE imx6_smarc_mfg_defconfig
 	JOBS=$2
@@ -22,11 +17,6 @@ fi
 
 if [ $1 == "rev-sa01" ]; then
 	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE imx6_rev_sa01_defconfig
-	JOBS=$2
-fi
-
-if [ $1 == "rev-sa01-p" ]; then
-	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE imx6_rev_sa01_p_defconfig
 	JOBS=$2
 fi
 

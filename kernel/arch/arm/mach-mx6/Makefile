@@ -22,5 +22,5 @@ obj-$(CONFIG_USB_FSL_ARC_OTG) += usb_dr.o
 obj-$(CONFIG_USB_EHCI_ARC_H1) += usb_h1.o
 obj-$(CONFIG_MACH_IMX_BLUETOOTH_RFKILL) += mx6_bt_rfkill.o
 obj-$(CONFIG_PCI_MSI) += msi.o
-obj-$(CONFIG_MACH_MX6_SMARC) += smarc/ board-mx6_smarc.o
-obj-$(CONFIG_MACH_MX6_SMARC_P) += smarc/ board-mx6_smarc_p.o mx6_smarc_pmic_pfuze100.o
+obj-$(CONFIG_SMARC_PMIC_WM8326) += smarc/ board-mx6_smarc.o
+obj-$(CONFIG_SMARC_PMIC_PFUZE) += smarc/ board-mx6_smarc.o mx6_smarc_pmic_pfuze100.o

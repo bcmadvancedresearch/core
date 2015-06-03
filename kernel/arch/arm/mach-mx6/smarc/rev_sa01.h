@@ -77,15 +77,6 @@ static iomux_v3_cfg_t mx6q_smarc_sdio2_pads[] = {
 	MX6Q_PAD_ENET_CRS_DV__GPIO_1_25,
 };
 
-static iomux_v3_cfg_t mx6q_smarc_sdio3_pads[] = {
-	MX6Q_PAD_SD3_CLK__USDHC3_CLK_50MHZ,
-	MX6Q_PAD_SD3_CMD__USDHC3_CMD_50MHZ,
-	MX6Q_PAD_SD3_DAT0__USDHC3_DAT0_50MHZ,
-	MX6Q_PAD_SD3_DAT1__USDHC3_DAT1_50MHZ,
-	MX6Q_PAD_SD3_DAT2__USDHC3_DAT2_50MHZ,
-	MX6Q_PAD_SD3_DAT3__USDHC3_DAT3_50MHZ,
-};
-
 static iomux_v3_cfg_t mx6dl_smarc_sdio2_pads[] = {
 	MX6DL_PAD_SD2_CLK__USDHC2_CLK,
 	MX6DL_PAD_SD2_CMD__USDHC2_CMD,
@@ -96,15 +87,6 @@ static iomux_v3_cfg_t mx6dl_smarc_sdio2_pads[] = {
 	MX6DL_PAD_EIM_DA13__GPIO_3_13,
 	MX6DL_PAD_EIM_DA14__GPIO_3_14,
 	MX6DL_PAD_ENET_CRS_DV__GPIO_1_25,
-};
-
-static iomux_v3_cfg_t mx6dl_smarc_sdio3_pads[] = {
-	MX6DL_PAD_SD3_CLK__USDHC3_CLK_50MHZ,
-	MX6DL_PAD_SD3_CMD__USDHC3_CMD_50MHZ,
-	MX6DL_PAD_SD3_DAT0__USDHC3_DAT0_50MHZ,
-	MX6DL_PAD_SD3_DAT1__USDHC3_DAT1_50MHZ,
-	MX6DL_PAD_SD3_DAT2__USDHC3_DAT2_50MHZ,
-	MX6DL_PAD_SD3_DAT3__USDHC3_DAT3_50MHZ,
 };
 
 static const struct esdhc_platform_data mx6q_smarc_sdio2_data __initconst = {
@@ -147,16 +129,12 @@ static iomux_v3_cfg_t mx6solo_smarc_gpio_pads[] = {
 	MX6DL_PAD_EIM_D29__GPIO_3_29,		// GPIO 11
 };
 
-static struct fsl_mxc_lightsensor_platform_data ls_data = {
-	.rext = 499,
-};
-
 /* -- I2C Config -- */
 static struct wm8962_pdata wm8962_config_data;
 static int mma8451_position;
 
 static struct pca953x_platform_data my_pca953x_pdata = {
-	.gpio_base = MX6Q_PAD_CSI0_DAT9__I2C1_SCL,
+	.gpio_base = (unsigned)MX6Q_PAD_CSI0_DAT9__I2C1_SCL,
 };
 
 static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
@@ -265,6 +243,7 @@ static iomux_v3_cfg_t mx6solo_smarc_i2c2_pads[] = {
     MX6DL_PAD_KEY_ROW3__I2C2_SDA,    /* I2C2 SDA */
 };
 
+#ifdef	CONFIG_SMARC_DISPLAY_LVDS
 /* -- Panel -- */
 #define SMARC_LVDS_BKLT_EN  IMX_GPIO_NR(3, 0)
 #define SMARC_LCD_VDD_EN    IMX_GPIO_NR(2, 22)
@@ -279,6 +258,7 @@ static iomux_v3_cfg_t mx6solo_smarc_lvds_ctr_pads[] = {
 	MX6DL_PAD_EIM_DA0__GPIO_3_0,
 	MX6DL_PAD_EIM_A16__GPIO_2_22,
 };
+#endif
 
 static iomux_v3_cfg_t mx6q_smarc_can_pad[] = {
 	MX6Q_PAD_GPIO_7__CAN1_TXCAN,
@@ -294,6 +274,7 @@ static iomux_v3_cfg_t mx6solo_smarc_can_pad[] = {
 	MX6DL_PAD_KEY_COL4__CAN2_TXCAN,
 };
 
+#ifdef	CONFIG_SMARC_DISPLAY_VGA
 static iomux_v3_cfg_t mx6q_smarc_ttl_pad[] = {
 	MX6Q_PAD_DI0_DISP_CLK__IPU1_DI0_DISP_CLK,
 	MX6Q_PAD_DI0_PIN2__IPU1_DI0_PIN2,
@@ -355,5 +336,6 @@ static iomux_v3_cfg_t mx6solo_smarc_ttl_pad[] = {
 	MX6DL_PAD_DISP0_DAT22__IPU1_DISP0_DAT_22,
 	MX6DL_PAD_DISP0_DAT23__IPU1_DISP0_DAT_23,
 };
+#endif
 
 #endif
