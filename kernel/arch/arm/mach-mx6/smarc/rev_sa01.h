@@ -16,7 +16,7 @@
 #define	SMARC_GPIO1			IMX_GPIO_NR(1, 17)
 #define	SMARC_CODEC_PWR_EN		IMX_GPIO_NR(1, 17)
 
-#ifdef  CONFIG_MACH_MX6_SMARC_P
+#ifdef  CONFIG_SMARC_PMIC_PFUZE
 #define	SMARC_GPIO2			IMX_GPIO_NR(2, 3)
 #define	SMARC_GPIO3			IMX_GPIO_NR(2, 4)
 #else
@@ -48,7 +48,7 @@
 static iomux_v3_cfg_t mx6q_smarc_gpio_pads[] = {
 	MX6Q_PAD_SD1_DAT0__GPIO_1_16,		// GPIO 0
 	MX6Q_PAD_SD1_DAT1__GPIO_1_17,		// GPIO 1
-	#ifdef	CONFIG_MACH_MX6_SMARC_P
+	#ifdef	CONFIG_SMARC_PMIC_PFUZE
 	MX6Q_PAD_NANDF_D3__GPIO_2_3,		// GPIO 2
 	MX6Q_PAD_NANDF_D4__GPIO_2_4,		// GPIO 3
 	#else
@@ -112,7 +112,7 @@ static const struct esdhc_platform_data mx6q_smarc_sdio3_data __initconst = {
 static iomux_v3_cfg_t mx6solo_smarc_gpio_pads[] = {
 	MX6DL_PAD_SD1_DAT0__GPIO_1_16,		// GPIO 0
 	MX6DL_PAD_SD1_DAT1__GPIO_1_17,		// GPIO 1
-	#ifdef  CONFIG_MACH_MX6_SMARC_P
+	#ifdef  CONFIG_SMARC_PMIC_PFUZE
 	MX6DL_PAD_NANDF_D3__GPIO_2_3,		// GPIO 2
 	MX6DL_PAD_NANDF_D4__GPIO_2_4,		// GPIO 3
 	#else
