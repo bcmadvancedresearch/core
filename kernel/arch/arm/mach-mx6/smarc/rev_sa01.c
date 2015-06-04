@@ -247,7 +247,7 @@ static struct ipuv3_fb_platform_data smarc_fb_data[] = {
 	{
 	.disp_dev = "ldb",
 	.interface_pix_fmt = IPU_PIX_FMT_RGB666,
-	.mode_str = "SVGA",
+	.mode_str = "VGA",
 	.default_bpp = 32,
 	.int_clk = false,
 	.late_init = false,
