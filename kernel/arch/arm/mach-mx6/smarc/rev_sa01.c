@@ -203,6 +203,15 @@ void set_smarc_hdmi(void)
 }
 
 #ifdef	CONFIG_SMARC_DISPLAY_LVDS
+static struct fsl_mxc_ldb_platform_data ldb_data = {
+        .ipu_id                 = 0,
+        .disp_id                = 1,
+        .ext_ref                = 1,
+        .mode                   = LDB_SEP0,
+        .sec_ipu_id             = 0,
+        .sec_disp_id    = 0,
+};
+
 void set_smarc_lvds(void)
 {
 	if(cpu_is_mx6q()) {
@@ -266,17 +275,6 @@ static struct fsl_mxc_lcd_platform_data lcdif_data = {
 static struct viv_gpu_platform_data imx6q_gpu_pdata __initdata = {
 	.reserved_mem_size = SZ_128M + SZ_64M - SZ_16M,
 };
-
-#ifdef	CONFIG_SMARC_DISPLAY_LVDS
-static struct fsl_mxc_ldb_platform_data ldb_data = {
-	.ipu_id			= 0,
-	.disp_id		= 1,
-	.ext_ref		= 1,
-	.mode			= LDB_SEP0,
-	.sec_ipu_id		= 0,
-	.sec_disp_id	= 0,
-};
-#endif
 
 static struct imx_ipuv3_platform_data ipu_data[] = {
 {
