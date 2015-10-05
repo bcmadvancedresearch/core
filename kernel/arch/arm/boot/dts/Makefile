@@ -208,7 +208,9 @@ dtb-$(CONFIG_ARCH_MXC) += \
 	imx6sx-sdb-emmc.dtb \
 	imx6sx-sdb-m4.dtb \
 	imx6q-rev-sa01-pfuze100.dtb \
+	imx6q-rev-sa01-wm8326.dtb \
 	imx6solo-rev-sa01-pfuze100.dtb \
+	imx6solo-rev-sa01-wm8326.dtb \
 	vf610-twr.dtb
 dtb-$(CONFIG_ARCH_MXS) += imx23-evk.dtb \
 	imx23-olinuxino.dtb \

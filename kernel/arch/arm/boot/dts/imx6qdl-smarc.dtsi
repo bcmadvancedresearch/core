@@ -123,11 +123,6 @@
 	status = "okay";
 };
 
-&cpu0 {
-	arm-supply = <&sw1a_reg>;
-	soc-supply = <&sw1c_reg>;
-};
-
 &fec {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_enet>;
@@ -146,12 +141,6 @@
 	dcic_id = <1>;
 	dcic_mux = "dcic-lvds1";
 	status = "okay";
-};
-
-&gpc {
-	/* use ldo-bypass, u-boot will check it and configure */
-	fsl,ldo-bypass = <1>;
-	fsl,wdog-reset = <2>;
 };
 
 &hdmi_audio {

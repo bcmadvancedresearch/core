@@ -2,7 +2,7 @@
 
 #include "imx6q.dtsi"
 #include "imx6qdl-smarc.dtsi"
-#include "imx6qdl-rev-sa01-pfuze100.dtsi"
+#include "imx6qdl-rev-sa01-wm8326.dtsi"
 
 / {
 	model = "Freescale i.MX6 Quad SMARC REV-SA01 Device Board";
@@ -25,15 +25,4 @@
 
 &sata {
 	status = "okay";
-};
-
-&cpu0 {
-	arm-supply = <&sw1a_reg>;
-	soc-supply = <&sw1c_reg>;
-};
-
-&gpc {
-	/* use ldo-bypass, u-boot will check it and configure */
-	fsl,ldo-bypass = <1>;
-	fsl,wdog-reset = <2>;
 };

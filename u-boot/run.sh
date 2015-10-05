@@ -19,8 +19,24 @@ if [ $1 == "quad-p" ]; then
 	PLATFORM=mx6qsmarc-p_config
 fi
 
+if [ $1 == "quad" ]; then
+        PLATFORM=mx6qsmarc_config
+fi
+
 if [ $1 == "solo-p" ]; then
 	PLATFORM=mx6solosmarc-p_config
+fi
+
+if [ $1 == "solo" ]; then
+        PLATFORM=mx6solosmarc_config
+fi
+
+if [ $1 == "dl-p" ]; then
+        PLATFORM=mx6dlsmarc-p_config
+fi
+
+if [ $1 == "dl" ]; then
+        PLATFORM=mx6dlsmarc_config
 fi
 
 JOBS=$2
