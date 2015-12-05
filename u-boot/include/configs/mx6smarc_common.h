@@ -87,6 +87,7 @@
 /* Command definition */
 #include <config_cmd_default.h>
 
+#define CONFIG_CMD_HDMIDETECT
 #define CONFIG_CMD_BMODE
 #define CONFIG_CMD_BOOTZ
 #define CONFIG_CMD_SETEXPR
@@ -168,6 +169,11 @@
 	"mmcpart=" __stringify(CONFIG_SYS_MMC_IMG_LOAD_PART) "\0" \
 	"mmcroot=" CONFIG_MMCROOT " rootwait rw\0" \
 	"mmcautodetect=yes\0" \
+	"detect_hdmi=if hdmidet; then run bootargs_hdmi; else run bootargs_ldb; fi\0" \
+	"bootargs_hdmi=setenv bootargs ${bootargs} video=mxcfb0:dev=hdmi,1920x1080M@60," \
+		"if=RGB24,bpp=32 video=mxcfb1:off video=mxcfb2:off fbmem=28M\0" \
+	"bootargs_ldb=setenv bootargs ${bootargs} video=mxcfb0:dev=ldb,1024x600M@60," \
+		"if=RGB666,bpp=32 video=mxcfb1:off video=mxcfb2:off fbmem=28M\0" \
 	"update_sd_firmware=" \
 		"if test ${ip_dyn} = yes; then " \
 			"setenv get_cmd dhcp; " \
@@ -183,7 +189,7 @@
 		"fi\0" \
 	"smp=" CONFIG_SYS_NOSMP "\0"\
 	"mmcargs=setenv bootargs console=${console},${baudrate} ${smp} " \
-		"root=${mmcroot}\0" \
+		"root=${mmcroot}; run detect_hdmi\0" \
 	"loadbootscript=" \
 		"fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} ${script};\0" \
 	"bootscript=echo Running bootscript from mmc ...; " \
