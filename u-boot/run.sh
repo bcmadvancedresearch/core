@@ -40,8 +40,23 @@ if [ $1 == "smarc-solo-512-mfg" ]; then
 	JOBS=$2
 fi
 
+if [ $1 == "smarc-dl-mfg" ]; then
+	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE mx6dl_smarc_mfg_config
+	JOBS=$2
+fi
+
 if [ $1 == "rev-sa01-solo" ]; then
 	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE mx6solo_rev_sa01_config
+	JOBS=$2
+fi
+
+if [ $1 == "rev-sa01-solo-512" ]; then
+	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE mx6solo_rev_sa01_512_config
+	JOBS=$2
+fi
+
+if [ $1 == "rev-sa01-dl" ]; then
+	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE mx6dl_rev_sa01_config
 	JOBS=$2
 fi
 

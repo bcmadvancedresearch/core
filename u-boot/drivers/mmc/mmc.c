@@ -1335,7 +1335,12 @@ int mmc_startup(struct mmc *mmc)
 	if (!IS_SD(mmc) && (mmc->version >= MMC_VERSION_4)) {
 		/* check  ext_csd version and capacity */
 		err = mmc_send_ext_csd(mmc, ext_csd);
+		#ifdef CONFIG_EMMC_MLC
 		if (!err & (ext_csd[192] >= 2)) {
+		#else
+		if (!err & (ext_csd[192] >= 2) &&
+			(mmc->ocr & OCR_ACCESS_MODE) == OCR_ACCESS_BY_SECTOR){
+		#endif
 			/*
 			 * According to the JEDEC Standard, the value of
 			 * ext_csd's capacity is valid if the value is more
@@ -1344,8 +1349,12 @@ int mmc_startup(struct mmc *mmc)
 			capacity = ext_csd[212] << 0 | ext_csd[213] << 8 |
 				   ext_csd[214] << 16 | ext_csd[215] << 24;
 			capacity *= 512;
+			#ifdef CONFIG_EMMC_MLC
 			if ((capacity >> 20) > 2 * 1024)
 				mmc->capacity = capacity;
+			#else
+			mmc->capacity = capacity;
+			#endif
 		}
 
 		/*

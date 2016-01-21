@@ -139,6 +139,7 @@
 #define OCR_HCS			0x40000000
 #define OCR_VOLTAGE_MASK	0x007FFF80
 #define OCR_ACCESS_MODE		0x60000000
+#define OCR_ACCESS_BY_SECTOR   (1 << 30)
 
 /* UHS-I related defines */
 #define SD_SWITCH_18V	0x01000000

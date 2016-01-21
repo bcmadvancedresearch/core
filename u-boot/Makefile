@@ -3329,9 +3329,13 @@ mx6q_arm2_iram_config	: unconfig
 mx6q_smarc_2g_mfg_config		\
 mx6q_smarc_mfg_config			\
 mx6solo_smarc_mfg_config		\
+mx6solo_smarc_512_mfg_config		\
+mx6dl_smarc_mfg_config			\
 mx6q_rev_sa01_2g_config			\
 mx6q_rev_sa01_config			\
-mx6solo_rev_sa01_config : unconfig
+mx6solo_rev_sa01_512_config		\
+mx6solo_rev_sa01_config			\
+mx6dl_rev_sa01_config : unconfig
 	@[ -z "$(findstring iram_,$@)" ] || \
 		{ echo "TEXT_BASE = 0x00907000" >$(obj)board/freescale/mx6q_smarc/config.tmp ; \
 		  echo "... with iram configuration" ; \

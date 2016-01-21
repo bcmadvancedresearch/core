@@ -32,11 +32,19 @@ rev-sa01-uboot.bin: cleanuboot
 	$(MAKE) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) -C u-boot/ mx6solo_rev_sa01_config
 	$(MAKE) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) -C u-boot/
 	install u-boot/u-boot.bin u-boot-solo.bin
+	$(MAKE) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) -C u-boot/ distclean
+	$(MAKE) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) -C u-boot/ mx6solo_rev_sa01_512_config
+	$(MAKE) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) -C u-boot/
+	install u-boot/u-boot.bin u-boot-solo-512.bin
+	$(MAKE) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) -C u-boot/ distclean
+	$(MAKE) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) -C u-boot/ mx6dl_rev_sa01_config
+	$(MAKE) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) -C u-boot/
+	install u-boot/u-boot.bin u-boot-dl.bin
 
 clean:
 	$(MAKE) CROSS_COMPILE=$(CROSS_COMPILE) -C u-boot/ distclean
 	$(MAKE) CROSS_COMPILE=$(CROSS_COMPILE) -C kernel/ distclean
-	rm -f u-boot-solo.bin u-boot-quad.bin uImage u-boot-quad-2g.bin \
+	rm -f u-boot-solo.bin u-boot-solo-512.bin u-boot-dl.bin u-boot-quad.bin uImage u-boot-quad-2g.bin \
 		kernel/arch/arm/boot/Image \
 		kernel/arch/arm/boot/compressed/lib1funcs.S \
 		kernel/arch/arm/boot/compressed/piggy.gzip \
@@ -50,5 +58,5 @@ cleankernel:
 	rm -f uImage
 
 cleanuboot:
-	rm -f u-boot-solo.bin u-boot-quad.bin u-boot-quad-2g.bin
+	rm -f u-boot-solo.bin u-boot-solo-512.bin u-boot-dl.bin u-boot-quad.bin u-boot-quad-2g.bin
 
